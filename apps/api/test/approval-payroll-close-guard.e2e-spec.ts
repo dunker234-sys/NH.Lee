@@ -6,7 +6,7 @@ import { PrismaService } from '../src/common/prisma/prisma.service';
 import { RECALCULATION_QUEUE_NAME, RecalculationJobData } from '../src/modules/recalculation/queue.constants';
 import { RecalculationTriggerService } from '../src/modules/recalculation/recalculation-trigger.service';
 import { NOTIFICATIONS_QUEUE_NAME, NotificationJobData } from '../src/modules/notifications/queue.constants';
-import { PayrollCloseGuardService } from '../src/modules/approval/payroll-close-guard.service';
+import { PayrollCloseGuardService } from '../src/modules/payroll-close/payroll-close-guard.service';
 import { createTestApp } from './setup/app';
 import { resetDatabase } from './setup/db';
 import { login } from './setup/auth-helper';
@@ -112,11 +112,11 @@ describe('마감 차단 가드 — 미승인 실적 존재 여부', () => {
 
     const { accessToken } = await login(app, fixture.employees.siteManagerA.employeeNo, fixture.password, 'dev-close-guard');
     const readinessBefore = await request(app.getHttpServer())
-      .get(`/admin/approval/payroll-close/readiness?siteId=${fixture.siteA.id}&yearMonth=${yearMonth}`)
+      .get(`/admin/payroll-close/${fixture.siteA.id}/${yearMonth}/readiness`)
       .set(auth(accessToken));
     expect(readinessBefore.status).toBe(200);
     expect(readinessBefore.body.blocked).toBe(true);
-    expect(readinessBefore.body.unresolvedCount).toBeGreaterThan(0);
+    expect(readinessBefore.body.unresolvedUnapprovedActualsCount).toBeGreaterThan(0);
 
     const bulkRes = await request(app.getHttpServer())
       .post('/admin/approval/overtime-requests/bulk-approve')
@@ -132,9 +132,9 @@ describe('마감 차단 가드 — 미승인 실적 존재 여부', () => {
     expect(await guard.hasUnresolvedUnapprovedActuals(fixture.siteA.id, yearMonth)).toBe(false);
 
     const readinessAfter = await request(app.getHttpServer())
-      .get(`/admin/approval/payroll-close/readiness?siteId=${fixture.siteA.id}&yearMonth=${yearMonth}`)
+      .get(`/admin/payroll-close/${fixture.siteA.id}/${yearMonth}/readiness`)
       .set(auth(accessToken));
     expect(readinessAfter.body.blocked).toBe(false);
-    expect(readinessAfter.body.unresolvedCount).toBe(0);
+    expect(readinessAfter.body.unresolvedUnapprovedActualsCount).toBe(0);
   }, 20000);
 });

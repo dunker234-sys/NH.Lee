@@ -117,6 +117,11 @@ model Site {
   laborAgreements          LaborAgreement[]
   workRules                WorkRule[]
   payrollCloses            PayrollClose[]
+  payrollCloseBatches      PayrollCloseBatch[]
+  payrollStatementItems    PayrollStatementItem[]
+  payrollExportRecords     PayrollExportRecord[]
+  payrollColumnMappings    PayrollColumnMapping[]
+  payrollValidationReports PayrollCloseValidationReport[]
   originDispatches         DispatchRequest[]          @relation("DispatchOriginSite")
   targetDispatches         DispatchRequest[]          @relation("DispatchTargetSite")
   verificationSignals      SiteVerificationSignal[]
@@ -254,6 +259,10 @@ model Employee {
   cutoversApproved             SiteCutover[]
   migrationReconciliationRecords MigrationReconciliationRecord[]
   nightWorkHealthCheckupStatus NightWorkHealthCheckupStatus?
+  wageRates                    EmployeeWageRate[]
+  payrollStatementItems        PayrollStatementItem[]
+  payrollCloseBatchRows        PayrollCloseBatchRow[]
+  payrollValidationFindings    PayrollCloseValidationFinding[]
 
   @@index([primarySiteId])
   @@index([partnerCompanyId])
@@ -1292,6 +1301,17 @@ model WorkRule {
   @@map("work_rule")
 }
 
+// STEP11: 사업장→권역→본사 3단계 마감 파이프라인. status(OPEN/CLOSED/RECLOSED)의
+// 기존 의미·소비처(RecalculationService.assertPayrollOpen(), correction 폐쇄기간
+// 차단)는 손대지 않는다 — stage는 완전히 직교하는 축이고, HQ_FINALIZED로 전환되는
+// 순간에만 status가 CLOSED로 바뀐다.
+enum PayrollCloseStage {
+  NOT_STARTED
+  SITE_SUBMITTED
+  REGION_APPROVED
+  HQ_FINALIZED
+}
+
 model PayrollClose {
   id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   siteId          String             @map("site_id") @db.Uuid
@@ -1303,11 +1323,266 @@ model PayrollClose {
   createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  stage            PayrollCloseStage @default(NOT_STARTED)
+  siteSubmittedAt  DateTime?         @map("site_submitted_at") @db.Timestamptz(6)
+  siteSubmittedBy  String?           @map("site_submitted_by") @db.Uuid
+  regionApprovedAt DateTime?         @map("region_approved_at") @db.Timestamptz(6)
+  regionApprovedBy String?           @map("region_approved_by") @db.Uuid
+  // 마감취소(재개) — status를 CLOSED→OPEN, stage를 다시 NOT_STARTED로 되돌릴 때만 채운다.
+  reopenedAt   DateTime? @map("reopened_at") @db.Timestamptz(6)
+  reopenedBy   String?   @map("reopened_by") @db.Uuid
+  reopenReason String?   @map("reopen_reason") @db.Text
+  // 소프트 참조(FK 제약 없음) — PayrollCloseValidationReport는 (siteId,periodYearMonth)로
+  // 별도 조회 가능하므로 여기서는 "마지막으로 확인한 리포트가 무엇인지"만 기록한다.
+  lastValidationReportId String? @map("last_validation_report_id") @db.Uuid
+
   site             Site      @relation(fields: [siteId], references: [id])
   closedByEmployee Employee? @relation(fields: [closedBy], references: [id])
 
+  batches        PayrollCloseBatch[]
+  statementItems PayrollStatementItem[]
+  exportRecords  PayrollExportRecord[]
+
   @@unique([siteId, periodYearMonth])
   @@map("payroll_close")
+}
+
+enum PayrollCloseBatchType {
+  INITIAL_CLOSE
+  RECLOSE
+}
+
+enum PayrollCloseBatchRowChangeType {
+  ADDED
+  REMOVED
+  CHANGED
+}
+
+// 재마감 차분 리포트 — HrSyncBatch/HrSyncBatchRow(STEP10)와 동일한 배치+행 구조.
+// 최초 마감은 전원 ADDED, 재마감은 실제로 값이 바뀐 직원만 CHANGED(+changedFields)로 남긴다.
+model PayrollCloseBatch {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollCloseId       String                 @map("payroll_close_id") @db.Uuid
+  siteId               String                 @map("site_id") @db.Uuid
+  periodYearMonth      String                 @map("period_year_month")
+  version              Int // = 이 배치가 만들어진 시점의 PayrollClose.version (1=최초 마감)
+  batchType            PayrollCloseBatchType  @map("batch_type")
+  triggeredBy          String                 @map("triggered_by") @db.Uuid
+  changedEmployeeCount Int                    @default(0) @map("changed_employee_count")
+  changedItemCount     Int                    @default(0) @map("changed_item_count")
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  payrollClose PayrollClose @relation(fields: [payrollCloseId], references: [id])
+  site         Site         @relation(fields: [siteId], references: [id])
+  rows         PayrollCloseBatchRow[]
+
+  @@index([siteId, periodYearMonth])
+  @@map("payroll_close_batch")
+}
+
+model PayrollCloseBatchRow {
+  id            String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId       String                         @map("batch_id") @db.Uuid
+  employeeId    String                         @map("employee_id") @db.Uuid
+  changeType    PayrollCloseBatchRowChangeType @map("change_type")
+  beforeValue   Json?                          @map("before_value") // 이전 버전 PayrollStatementItem 스냅샷
+  afterValue    Json?                          @map("after_value")  // 이번 버전 스냅샷
+  changedFields String[]                       @map("changed_fields")
+  createdAt     DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch    PayrollCloseBatch @relation(fields: [batchId], references: [id])
+  employee Employee          @relation(fields: [employeeId], references: [id])
+
+  @@index([batchId])
+  @@index([employeeId])
+  @@map("payroll_close_batch_row")
+}
+
+enum PayrollLayoutType {
+  MONTHLY
+  DAILY
+}
+
+// 급여 산출 항목 — 임금대장(근기법§48①·시행령§27①6·7·8호)/임금명세서(§48②) 기재사항의
+// 공급원. workDate가 NULL이면 MONTHLY 레이아웃(월 전체 1행), 채워져 있으면 DAILY(일용)
+// 레이아웃의 그 날짜 1행 — 한 테이블로 두 레이아웃을 모두 표현한다.
+model PayrollStatementItem {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollCloseId  String            @map("payroll_close_id") @db.Uuid
+  employeeId      String            @map("employee_id") @db.Uuid
+  siteId          String            @map("site_id") @db.Uuid
+  periodYearMonth String            @map("period_year_month")
+  layoutType      PayrollLayoutType @map("layout_type")
+  workDate        DateTime?         @map("work_date") @db.Date
+
+  scheduledWorkMinutes      Int @default(0) @map("scheduled_work_minutes")
+  approvedOvertimeMinutes   Int @default(0) @map("approved_overtime_minutes")
+  // CLAUDE.md 절대규칙2: 미승인 실적은 0으로 만들지 않는다 — approvedOvertimeMinutes와
+  // 절대 합산·대체하지 않고 항상 별도 컬럼으로 끝까지 보존한다.
+  unapprovedOvertimeMinutes Int @default(0) @map("unapproved_overtime_minutes")
+  nightWorkMinutes          Int @default(0) @map("night_work_minutes")
+  holidayWorkMinutesNormal  Int @default(0) @map("holiday_work_minutes_normal")
+  holidayWorkMinutesExcess  Int @default(0) @map("holiday_work_minutes_excess")
+
+  absenceDays    Decimal @default(0) @db.Decimal(5, 2) @map("absence_days")
+  latenessDays   Int     @default(0) @map("lateness_days")
+  earlyLeaveDays Int     @default(0) @map("early_leave_days")
+  paidLeaveDays  Decimal @default(0) @db.Decimal(5, 2) @map("paid_leave_days")
+  unpaidLeaveDays Decimal @default(0) @db.Decimal(5, 2) @map("unpaid_leave_days")
+
+  weeklyPaidRestEligibleCount Int @default(0) @map("weekly_paid_rest_eligible_count")
+  weeklyPaidRestMinutes       Int @default(0) @map("weekly_paid_rest_minutes")
+
+  // 금액(KRW) — 참고용 산출값이다. 통상임금 범위 판단은 노무 검토 대상이며, 이
+  // 시스템에는 급여 지급 실행 기능이 없다(schema 전체에 wage 지급 모델 없음).
+  ordinaryHourlyWageAmount Decimal @default(0) @db.Decimal(12, 0) @map("ordinary_hourly_wage_amount")
+  basePayAmount            Decimal @default(0) @db.Decimal(12, 0) @map("base_pay_amount")
+  overtimePayAmount        Decimal @default(0) @db.Decimal(12, 0) @map("overtime_pay_amount")
+  nightPayAmount           Decimal @default(0) @db.Decimal(12, 0) @map("night_pay_amount")
+  holidayPayAmount         Decimal @default(0) @db.Decimal(12, 0) @map("holiday_pay_amount")
+  weeklyPaidRestPayAmount  Decimal @default(0) @db.Decimal(12, 0) @map("weekly_paid_rest_pay_amount")
+  totalPayAmount           Decimal @default(0) @db.Decimal(12, 0) @map("total_pay_amount")
+
+  breakdown         Json     @map("breakdown")
+  calcVersion       Int      @default(1) @map("calc_version")
+  calculatedAt      DateTime @default(now()) @map("calculated_at") @db.Timestamptz(6)
+  inputSnapshotHash String   @map("input_snapshot_hash")
+
+  payrollClose PayrollClose @relation(fields: [payrollCloseId], references: [id])
+  employee     Employee     @relation(fields: [employeeId], references: [id])
+  site         Site         @relation(fields: [siteId], references: [id])
+
+  @@unique([payrollCloseId, employeeId, workDate])
+  @@index([siteId, periodYearMonth])
+  @@map("payroll_statement_item")
+}
+
+enum WageType {
+  HOURLY
+  MONTHLY
+}
+
+// 시급/월급 — schema 전체를 확인했으나 이전 STEP까지 임금 단가 모델이 전혀 없었다.
+// 급여 정보라 쓰기는 HQ_HR/ADMIN만(employee_protected_status와 동일한 권한 모델).
+model EmployeeWageRate {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String    @map("employee_id") @db.Uuid
+  wageType           WageType  @map("wage_type")
+  baseAmount         Decimal   @db.Decimal(12, 0) @map("base_amount") // HOURLY=시급, MONTHLY=월급(원)
+  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
+  createdBy          String    @map("created_by") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, effectiveStartDate])
+  @@map("employee_wage_rate")
+}
+
+enum PayrollExportFormat {
+  EXCEL
+  CSV
+}
+
+enum PayrollTransmissionStatus {
+  EXPORTED
+  SENT
+  CONFIRMED
+  FAILED
+}
+
+model PayrollColumnMapping {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  layoutType PayrollLayoutType @map("layout_type")
+  siteId     String?           @map("site_id") @db.Uuid // NULL = 전사 기본
+  columns    Json // [{ sourceField, header, order, unit: 'MINUTES'|'HOURS'|'DAYS'|'KRW' }, ...]
+  isDefault  Boolean           @default(false) @map("is_default")
+  createdBy  String            @map("created_by") @db.Uuid
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  site          Site?                 @relation(fields: [siteId], references: [id])
+  exportRecords PayrollExportRecord[]
+
+  @@map("payroll_column_mapping")
+}
+
+// 급여 전송 이력 — 내보내기마다 그 시점의 PayrollClose.version을 못박아 둔다.
+// 재마감으로 버전이 올라가면 그 배치(PayrollCloseBatch)의 diff가 곧
+// "전송 이후 무엇이 바뀌었는지"에 대한 대사(reconciliation) 근거가 된다.
+model PayrollExportRecord {
+  id                 String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payrollCloseId     String                    @map("payroll_close_id") @db.Uuid
+  siteId             String                    @map("site_id") @db.Uuid
+  periodYearMonth    String                    @map("period_year_month")
+  version            Int
+  format             PayrollExportFormat
+  layoutType         PayrollLayoutType         @map("layout_type")
+  columnMappingId    String?                   @map("column_mapping_id") @db.Uuid
+  exportedBy         String                    @map("exported_by") @db.Uuid
+  exportedAt         DateTime                  @default(now()) @map("exported_at") @db.Timestamptz(6)
+  fileChecksum       String                    @map("file_checksum") // sha256(파일 바이트)
+  rowCount           Int                       @map("row_count")
+  transmissionStatus PayrollTransmissionStatus @default(EXPORTED) @map("transmission_status")
+  transmissionRef    String?                   @map("transmission_ref")
+
+  payrollClose  PayrollClose          @relation(fields: [payrollCloseId], references: [id])
+  site          Site                  @relation(fields: [siteId], references: [id])
+  columnMapping PayrollColumnMapping? @relation(fields: [columnMappingId], references: [id])
+
+  @@index([siteId, periodYearMonth])
+  @@map("payroll_export_record")
+}
+
+enum PayrollValidationSeverity {
+  INFO
+  WARNING
+  BLOCKING
+}
+
+enum PayrollValidationRuleCode {
+  MONTHLY_HOURS_OUTLIER
+  EXCESSIVE_OVERTIME
+  BREAK_NOT_GRANTED
+  CONSECUTIVE_WORKDAY_EXCEEDED
+}
+
+// 마감 전 자동 검증 — PayrollClose.lastValidationReportId가 acknowledgedAt!=null &&
+// blockingCount==0인 리포트를 가리켜야만 HQ_FINALIZED 전환이 허용된다(코드 강제).
+model PayrollCloseValidationReport {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId          String    @map("site_id") @db.Uuid
+  periodYearMonth String    @map("period_year_month")
+  generatedAt     DateTime  @default(now()) @map("generated_at") @db.Timestamptz(6)
+  generatedBy     String?   @map("generated_by") @db.Uuid // NULL = SYSTEM(야간 배치)
+  findingCount    Int       @default(0) @map("finding_count")
+  blockingCount   Int       @default(0) @map("blocking_count")
+  acknowledgedAt  DateTime? @map("acknowledged_at") @db.Timestamptz(6)
+  acknowledgedBy  String?   @map("acknowledged_by") @db.Uuid
+
+  site     Site                            @relation(fields: [siteId], references: [id])
+  findings PayrollCloseValidationFinding[]
+
+  @@index([siteId, periodYearMonth, generatedAt])
+  @@map("payroll_close_validation_report")
+}
+
+model PayrollCloseValidationFinding {
+  id         String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reportId   String                     @map("report_id") @db.Uuid
+  employeeId String?                    @map("employee_id") @db.Uuid // NULL = 사업장 전체 단위 발견
+  ruleCode   PayrollValidationRuleCode  @map("rule_code")
+  severity   PayrollValidationSeverity
+  message    String                     @db.Text
+  detail     Json?
+
+  report   PayrollCloseValidationReport @relation(fields: [reportId], references: [id])
+  employee Employee?                    @relation(fields: [employeeId], references: [id])
+
+  @@index([reportId])
+  @@map("payroll_close_validation_finding")
 }
 
 // STEP7.5: 개시 데이터 이관 — 사업장의 개통 상태. SiteStatus(ACTIVE/CLOSED)와는
@@ -1514,7 +1789,9 @@ model AccessLog {
 // ADMIN_CORRECTION, UNAPPROVED_JUDGMENT,
 // PERMISSION_CHANGE, PAYROLL_CLOSE, PAYROLL_RECLOSE, POLICY_CHANGE, SCOPE_BYPASS,
 // LOGIN_SUCCESS, LOGIN_FAILED, ACCOUNT_LOCKED, PASSWORD_CHANGED, DEVICE_BOUND,
-// TOKEN_REUSE_DETECTED (STEP 2), MIGRATION_COMMIT, CUTOVER_APPROVED (STEP 7.5)
+// TOKEN_REUSE_DETECTED (STEP 2), MIGRATION_COMMIT, CUTOVER_APPROVED (STEP 7.5),
+// PAYROLL_CLOSE_SITE_SUBMITTED, PAYROLL_CLOSE_REGION_APPROVED, PAYROLL_CLOSE_REOPENED
+// (STEP11 — 사업장/권역 단계 전이. 최종 확정은 기존 PAYROLL_CLOSE/PAYROLL_RECLOSE 재사용)
 model AuditLog {
   seq            BigInt   @id @default(autoincrement())
   actorPrincipal String   @map("actor_principal")

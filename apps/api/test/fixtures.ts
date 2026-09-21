@@ -21,6 +21,7 @@ import {
   NIGHT_WORK_HEALTH_CHECKUP_POLICY_EFFECTIVE_FROM,
 } from '../prisma/night-work-health-checkup-policy-defaults';
 import { HR_SYNC_POLICY_DEFAULTS, HR_SYNC_POLICY_EFFECTIVE_FROM } from '../prisma/hr-sync-policy-defaults';
+import { PAYROLL_POLICY_DEFAULTS, PAYROLL_POLICY_EFFECTIVE_FROM } from '../prisma/payroll-policy-defaults';
 import { createHash, randomBytes } from 'crypto';
 import { adminPrisma } from './setup/db';
 
@@ -281,6 +282,20 @@ export async function loadHrSyncPolicyConfigFixture(): Promise<void> {
         value: v.value as never,
         siteId: null,
         effectiveStartDate: HR_SYNC_POLICY_EFFECTIVE_FROM,
+      },
+    });
+  }
+}
+
+/** PayrollPolicyResolverService/PayrollValidationPolicyResolverService가 요구하는 policy_config 기본값(STEP11). */
+export async function loadPayrollPolicyConfigFixture(): Promise<void> {
+  for (const v of PAYROLL_POLICY_DEFAULTS) {
+    await adminPrisma.policyConfig.create({
+      data: {
+        key: v.key,
+        value: v.value as never,
+        siteId: null,
+        effectiveStartDate: PAYROLL_POLICY_EFFECTIVE_FROM,
       },
     });
   }

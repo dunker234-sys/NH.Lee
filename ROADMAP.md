@@ -597,17 +597,45 @@ Employee 계정은 임시 비밀번호 해시(`common/auth/temp-credential.util.
   각 큐의 active count가 0이 될 때까지 기다리는 `waitForActiveDrain()`
   추가로 해결 — 재검증 결과 25초 내 정상 종료, 에러 로그 0건.
 
-## STEP 11. 급여 마감 및 연동
+## STEP 11. 급여 마감 및 연동 ✅ 완료
 
-마감 프로세스(사업장→권역→본사, 배타 잠금+재조회), 급여 산출 항목(임금대장/명세서
-기재사항 기준 명명), 레이아웃 2종(월 단위/일 단위 일용), 내보내기 Exporter 추상화,
+마감 프로세스(사업장→권역→본사 3단계 승인 + `pg_advisory_xact_lock` 배타 잠금+재조회),
+급여 산출 항목(임금대장/명세서 기재사항 기준 명명, 시간·일수뿐 아니라 원화 금액까지
+포함), 레이아웃 2종(월 단위/일 단위 일용), 내보내기 Exporter 추상화(Excel/CSV),
 재마감(버전 기록+차분 리포트), 마감 전 자동 검증.
 
+핵심 설계 결정: 기존 `PayrollClose.status`(OPEN/CLOSED/RECLOSED)의 의미는 건드리지
+않고 새 `stage`(NOT_STARTED/SITE_SUBMITTED/REGION_APPROVED/HQ_FINALIZED) 컬럼을
+직교하는 축으로 추가했다 — `RecalculationService.assertPayrollOpen()`과 정정
+폐쇄기간 차단은 여전히 `status`만 보므로 기존 STEP8 테스트를 하나도 건드리지
+않고 실제 마감 파이프라인이 그 보호를 자동으로 이어받는다. 재마감 차분은
+STEP10 `HrSyncBatch`/`HrSyncBatchRow` 패턴을 재사용(`PayrollCloseBatch`/
+`PayrollCloseBatchRow`)했고, 배타 잠금은 `device-binding.service.ts`의
+`pg_advisory_xact_lock(hashtext(...))` 패턴을 그대로 따랐다. 임금 계산에 필요한
+시급/월급 모델(`EmployeeWageRate`)은 기존 schema 전체에 없던 것을 이번에 신설했고,
+통상임금 판단(어떤 수당이 산정 기초에 포함되는지 등)의 최종 확정은 노무 검토
+대상으로 명시(`totalPayAmount`는 참고용 산출값, 이 시스템엔 지급 실행 기능 자체가
+없음). 상세 설계는 `C:\Users\user\.claude\plans\cheeky-sparking-reef.md` 참고.
+
 **완료 조건**
-- 미승인 실적 잔존 사업장 마감 차단
-- 마감→산출→내보내기→재마감 통합 테스트 통과
-- 재마감 차분 리포트가 변경 근로자·항목·차이값 정확히 표시
-- 일용직 레이아웃 별도 산출
+- [x] 미승인 실적 잔존 사업장 마감 차단 — `test/payroll-close-lifecycle.e2e-spec.ts`,
+  UNAPPROVED_ACTUAL 잔존 시 `submit`이 400 `PAYROLL_CLOSE_BLOCKED`로 거부됨을 확인
+- [x] 마감→산출→내보내기→재마감 통합 테스트 통과 — 같은 파일, submit→검증→
+  approve→finalize(LOCKED 일괄 전환)→statement 산출→EXCEL/CSV 내보내기→
+  reopen→정정 반영→재산출→재마감까지 전체 파이프라인 확인
+- [x] 재마감 차분 리포트가 변경 근로자·항목·차이값 정확히 표시 — 같은 파일,
+  `GET .../diff`가 변경된 직원의 `approvedOvertimeMinutes` before/after(60→120)와
+  `changedFields`를 정확히 반환함을 확인
+- [x] 일용직 레이아웃 별도 산출 — 같은 파일, `EmploymentType.DAILY` 직원은
+  일자별 N행(`layoutType=DAILY`, `workDate` 채움), 월급제는 월 전체 1행
+  (`layoutType=MONTHLY`, `workDate=null`)로 분리 산출됨을 확인
+
+부수적으로 확인한 것: core-rules 신규 단위테스트 4개 파일(주휴시간 반올림,
+레이아웃 선택, 임금대장 항목 합성 — 미승인 연장 비합산 회귀테스트 포함, 통상시급·
+가산임금 계산) 전부 통과(42 suites/220 tests), `apps/api` 전체 단위테스트 회귀 없음
+(19 suites/83 tests), 전체 e2e 52개 파일 배치 재실행 회귀 없음(punches-p95 P95=
+507.3ms로 통과 포함). admin-web UI는 이번 1차 구현 범위 밖(STEP6.5~10 선례와 동일한
+결정, 사용자 확정).
 
 ## STEP 12. 보안 · 성능 · 배포
 

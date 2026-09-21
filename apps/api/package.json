@@ -22,7 +22,8 @@
     "seed:correction-policy": "ts-node --transpile-only prisma/seed-correction-policy.ts",
     "seed:weekly-alert-policy": "ts-node --transpile-only prisma/seed-weekly-alert-policy.ts",
     "seed:night-work-health-checkup-policy": "ts-node --transpile-only prisma/seed-night-work-health-checkup-policy.ts",
-    "seed:hr-sync-policy": "ts-node --transpile-only prisma/seed-hr-sync-policy.ts"
+    "seed:hr-sync-policy": "ts-node --transpile-only prisma/seed-hr-sync-policy.ts",
+    "seed:payroll-policy": "ts-node --transpile-only prisma/seed-payroll-policy.ts"
   },
   "dependencies": {
     "@attendance/core-rules": "workspace:*",

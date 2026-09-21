@@ -18,8 +18,6 @@ import { OvertimeApprovalController } from './overtime-approval.controller';
 import { OvertimeApprovalService } from './overtime-approval.service';
 import { OvertimeRequestController } from './overtime-request.controller';
 import { OvertimeRequestService } from './overtime-request.service';
-import { PayrollCloseGuardService } from './payroll-close-guard.service';
-import { PayrollCloseReadinessController } from './payroll-close-readiness.controller';
 import { WorkNotProvidedController } from './work-not-provided.controller';
 import { WorkNotProvidedService } from './work-not-provided.service';
 
@@ -35,7 +33,6 @@ import { WorkNotProvidedService } from './work-not-provided.service';
     ApprovalLineController,
     EarlyClockInController,
     ApprovalReportController,
-    PayrollCloseReadinessController,
   ],
   providers: [
     OvertimeRequestService,
@@ -47,12 +44,10 @@ import { WorkNotProvidedService } from './work-not-provided.service';
     ApprovalLineResolverService,
     EarlyClockInPatternService,
     ApprovalReportService,
-    PayrollCloseGuardService,
   ],
-  // STEP11이 마감(PayrollClose) 처리 시 PayrollCloseGuardService.hasUnresolvedUnapprovedActuals()를
-  // 그대로 주입해 쓸 수 있도록 export한다. ApprovalLineResolverService는
-  // STEP7이 휴가 신청/촉진 알림 라우팅에 그대로 재사용한다(결재선을
-  // 다시 만들지 않는다).
-  exports: [PayrollCloseGuardService, ApprovalLineResolverService, ApprovalReportService],
+  // ApprovalLineResolverService는 STEP7 휴가 신청/촉진 알림 라우팅과 STEP11
+  // 마감 단계 전이 알림 라우팅에 그대로 재사용한다(결재선을 다시 만들지 않는다).
+  // PayrollCloseGuardService는 STEP11에서 modules/payroll-close/로 이관했다.
+  exports: [ApprovalLineResolverService, ApprovalReportService],
 })
 export class ApprovalModule {}

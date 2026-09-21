@@ -45,7 +45,9 @@ export interface NotificationTypeDefinition {
  * 사전 경고, 조정 후보 포함), NIGHT_WORK_HEALTH_CHECKUP_TARGET(STEP9, 야간작업
  * 특수건강진단 대상자 판정 시 사업장 관리자·HQ_HR에게 안내), HR_SYNC_REVIEW_
  * REQUIRED(STEP10, 인사연동 배치 변경 비율이 임계값을 초과해 자동적용이
- * 멈췄을 때 HQ_HR·ADMIN에게 검토 요청).
+ * 멈췄을 때 HQ_HR·ADMIN에게 검토 요청), PAYROLL_CLOSE_SITE_SUBMITTED(STEP11,
+ * 사업장 마감 제출 시 권역 담당자에게 승인 요청), PAYROLL_CLOSE_REGION_APPROVED
+ * (STEP11, 권역 승인 완료 시 HQ_HR에게 최종 마감 요청).
  */
 export const NOTIFICATION_TYPES: Record<string, NotificationTypeDefinition> = {
   LEAVE_REQUEST_SUBMITTED: {
@@ -325,6 +327,26 @@ export const NOTIFICATION_TYPES: Record<string, NotificationTypeDefinition> = {
         body: (v) =>
           `${String(v.employeeName ?? '')}님이 남은 계획근태를 모두 채우면 이번 주 ${String(v.projectedStage ?? '')} ` +
           `단계(예상 ${(Number(v.projectedTotalMinutes ?? 0) / 60).toFixed(1)}시간)에 도달할 것으로 예상됩니다. 스케줄 조정을 검토해 주세요.`,
+      },
+    },
+  },
+  PAYROLL_CLOSE_SITE_SUBMITTED: {
+    urgent: false,
+    defaultChannels: ['PUSH', 'IN_APP'],
+    templates: {
+      ko: {
+        title: () => '급여 마감 승인 요청',
+        body: (v) => `사업장(${String(v.siteId ?? '')})의 ${String(v.periodYearMonth ?? '')} 급여 마감이 제출되었습니다. 검토 후 승인해 주세요.`,
+      },
+    },
+  },
+  PAYROLL_CLOSE_REGION_APPROVED: {
+    urgent: false,
+    defaultChannels: ['PUSH', 'IN_APP'],
+    templates: {
+      ko: {
+        title: () => '급여 최종 마감 요청',
+        body: (v) => `사업장(${String(v.siteId ?? '')})의 ${String(v.periodYearMonth ?? '')} 급여 마감이 권역 승인을 마쳤습니다. 최종 마감해 주세요.`,
       },
     },
   },

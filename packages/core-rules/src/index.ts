@@ -20,6 +20,7 @@ export * from './daily/daily-attendance';
 export * from './weekly/weekly-limit-violation';
 export * from './weekly/weekly-overtime-pay';
 export * from './weekly/weekly-paid-rest';
+export * from './weekly/weekly-paid-rest-minutes';
 export * from './weekly/weekly-alert-stage';
 export * from './weekly/weekly-overtime-projection';
 export * from './weekly/schedule-adjustment-suggestion';
@@ -58,3 +59,7 @@ export * from './leave/promotion/article-61-2-schedule';
 export * from './schedule/consecutive-rest';
 export * from './schedule/consecutive-workday';
 export * from './schedule/planned-break-check';
+
+export * from './payroll/payroll-layout';
+export * from './payroll/payroll-statement-synthesis';
+export * from './payroll/wage-calculation';

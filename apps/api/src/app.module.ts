@@ -12,6 +12,7 @@ import { NightWorkHealthCheckupModule } from './modules/night-work-health-checku
 import { ComplianceReportsModule } from './modules/compliance-reports/compliance-reports.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HrSyncModule } from './modules/hr-sync/hr-sync.module';
+import { PayrollCloseModule } from './modules/payroll-close/payroll-close.module';
 import { AuditLogModule } from './common/audit/audit-log.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -78,6 +79,7 @@ import { SystemBatchModule } from './modules/system-batch/system-batch.module';
     ComplianceReportsModule,
     DashboardModule,
     HrSyncModule,
+    PayrollCloseModule,
   ],
   providers: [
     // 실행 순서: JwtAuthGuard(토큰 검증) → PrincipalGuard(DB에서 principal/scope
