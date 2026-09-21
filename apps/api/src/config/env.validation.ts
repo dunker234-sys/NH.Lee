@@ -5,6 +5,9 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
 
   DATABASE_URL: Joi.string().uri().required(),
+  // STEP12: 위치정보 파기 배치 전용 최소권한 DB 롤(retention_job)의 커넥션
+  // 문자열 — app_rw(DATABASE_URL)와 물리적으로 분리한다.
+  RETENTION_JOB_DATABASE_URL: Joi.string().uri().required(),
 
   JWT_ACCESS_SECRET: Joi.string().min(16).required(),
   JWT_REFRESH_SECRET: Joi.string().min(16).required(),
@@ -20,6 +23,12 @@ export const envValidationSchema = Joi.object({
 
   // AES-256-GCM 키 — 64자리 hex(32바이트).
   QR_TOTP_ENCRYPTION_KEY: Joi.string().hex().length(64).required(),
+  // STEP12: 개인정보 컬럼(EmployeeProtectedStatus.statusType) 암호화 전용 키.
+  // QR_TOTP_ENCRYPTION_KEY와 절대 재사용하지 않는다(키 재사용 방지 원칙).
+  PII_ENCRYPTION_KEY: Joi.string().hex().length(64).required(),
+
+  // STEP12: 콤마 구분 오리진 allowlist. 비워두면(개발 기본값) 전체 허용 유지.
+  CORS_ALLOWED_ORIGINS: Joi.string().optional().allow(''),
 
   // STEP10: 어댑터 종류 전환은 이 값 한 줄로 한다. 나머지 HR_SYNC_* 값은
   // 선택된 어댑터가 실제로 fetchAll()을 호출할 때 없으면 그때 실패한다

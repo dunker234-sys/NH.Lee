@@ -17,7 +17,10 @@ export interface AppConfig {
   };
   crypto: {
     qrTotpEncryptionKey: string;
+    piiEncryptionKey: string;
   };
+  retentionJobDatabaseUrl: string;
+  corsAllowedOrigins: string[];
   hrSync: {
     adapterType: 'FILE' | 'DB' | 'API';
     file: {
@@ -58,7 +61,13 @@ export default (): AppConfig => ({
   crypto: {
     // env.validation.ts(Joi)가 64자리 hex(32바이트)로 보증하므로 non-null 단언한다.
     qrTotpEncryptionKey: process.env.QR_TOTP_ENCRYPTION_KEY as string,
+    piiEncryptionKey: process.env.PII_ENCRYPTION_KEY as string,
   },
+  retentionJobDatabaseUrl: process.env.RETENTION_JOB_DATABASE_URL as string,
+  corsAllowedOrigins: (process.env.CORS_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   // STEP10: 어댑터 종류(FILE/DB/API) 전환은 HR_SYNC_ADAPTER_TYPE 한 줄로 한다.
   // 자동적용 임계값(hrSyncAutoApplyChangeRatioThreshold)은 법령 수치는
   // 아니지만 기존 운영 임계값(지오펜스 반경 등)과 동일하게 policy_config에서

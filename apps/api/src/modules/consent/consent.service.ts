@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Consent, ConsentType } from '@prisma/client';
 import { ConsentPolicyResolverService } from '../../common/policy/consent-policy-resolver.service';
+import { PunchLocationRetentionTriggerService } from '../retention/punch-location-retention-trigger.service';
 import { ConsentRepository } from './consent.repository';
 
 export interface ConsentStatusView {
@@ -18,6 +19,7 @@ export class ConsentService {
   constructor(
     private readonly repo: ConsentRepository,
     private readonly policyResolver: ConsentPolicyResolverService,
+    private readonly retentionTrigger: PunchLocationRetentionTriggerService,
   ) {}
 
   async getPolicy(consentType: ConsentType): Promise<ConsentPolicyView> {
@@ -46,15 +48,19 @@ export class ConsentService {
   }
 
   /**
-   * 위치정보법 §24④(철회 시 지체없는 파기)에 대한 알려진 갭: 이 메서드는
-   * Consent(WITHDRAWN) 이력만 기록한다. punch_location 실제 삭제는
-   * PunchLocationRepository의 자체 주석("위치정보는 파기 배치(retention_job
-   * 롤)가 별도로 DELETE하며, 그 외 경로는 수정하지 않는다")이 이미 명시한
-   * 경계를 존중해 이 서비스에서 직접 DELETE/UPDATE하지 않는다 — 그 배치
-   * 자체가 아직 어떤 STEP에서도 구현되지 않았다(문서화된 갭, docs 참고).
+   * 위치정보법 §24④(철회 시 지체없는 파기). Consent(WITHDRAWN) 이력을 남긴
+   * 뒤, 실제 punch_location 삭제는 PunchLocationRepository의 경계("위치정보는
+   * 파기 배치(retention_job 롤)가 별도로 DELETE하며, 그 외 경로는 수정하지
+   * 않는다")를 존중해 이 서비스가 직접 하지 않고 retention 모듈의 즉시-파기
+   * 큐로 넘긴다(STEP12) — 완전 동기 삭제는 이 응답을 지연시키므로 채택하지
+   * 않는다, 큐 적재 자체가 "지체없이"를 만족한다.
    */
   async withdraw(employeeId: string, consentType: ConsentType): Promise<Consent> {
     const policy = await this.getPolicy(consentType);
-    return this.repo.recordEvent({ employeeId, consentType, status: 'WITHDRAWN', policyVersion: policy.policyVersion });
+    const result = await this.repo.recordEvent({ employeeId, consentType, status: 'WITHDRAWN', policyVersion: policy.policyVersion });
+    if (consentType === 'LOCATION_COLLECTION') {
+      await this.retentionTrigger.onConsentWithdrawn(employeeId);
+    }
+    return result;
   }
 }

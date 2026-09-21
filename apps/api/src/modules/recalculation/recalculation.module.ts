@@ -13,6 +13,10 @@ import { WeeklyRecalcBatchConsumer } from './weekly-recalc-batch.consumer';
 import { WeeklyRecalcBatchScheduleService } from './weekly-recalc-batch-schedule.service';
 import { WeeklyRecalcBatchService } from './weekly-recalc-batch.service';
 import { WEEKLY_RECALC_BATCH_QUEUE_NAME } from './weekly-recalc-batch.queue.constants';
+import { MonthlyRecalcBatchConsumer } from './monthly-recalc-batch.consumer';
+import { MonthlyRecalcBatchScheduleService } from './monthly-recalc-batch-schedule.service';
+import { MonthlyRecalcBatchService } from './monthly-recalc-batch.service';
+import { MONTHLY_RECALC_BATCH_QUEUE_NAME } from './monthly-recalc-batch.queue.constants';
 
 @Module({
   imports: [
@@ -43,6 +47,15 @@ import { WEEKLY_RECALC_BATCH_QUEUE_NAME } from './weekly-recalc-batch.queue.cons
         removeOnComplete: true,
       },
     }),
+    // STEP12: 월마감 직전 완전성 재검증 전용 큐. 위 두 큐와 물리적으로 분리한다.
+    BullModule.registerQueue({
+      name: MONTHLY_RECALC_BATCH_QUEUE_NAME,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 500 },
+        removeOnComplete: true,
+      },
+    }),
   ],
   providers: [
     AttendanceInputBuilderService,
@@ -55,7 +68,16 @@ import { WEEKLY_RECALC_BATCH_QUEUE_NAME } from './weekly-recalc-batch.queue.cons
     WeeklyRecalcBatchService,
     WeeklyRecalcBatchConsumer,
     WeeklyRecalcBatchScheduleService,
+    MonthlyRecalcBatchService,
+    MonthlyRecalcBatchConsumer,
+    MonthlyRecalcBatchScheduleService,
   ],
-  exports: [RecalculationService, RecalculationTriggerService, RecalculationOpsService, WeeklyRecalcBatchService],
+  exports: [
+    RecalculationService,
+    RecalculationTriggerService,
+    RecalculationOpsService,
+    WeeklyRecalcBatchService,
+    MonthlyRecalcBatchService,
+  ],
 })
 export class RecalculationModule {}

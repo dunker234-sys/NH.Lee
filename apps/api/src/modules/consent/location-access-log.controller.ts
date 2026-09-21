@@ -3,7 +3,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CursorPageQueryDto } from '../../common/dto/cursor-page-query.dto';
 import { CurrentPrincipal } from '../../common/decorators/current-principal.decorator';
 import { EmployeePrincipal } from '../../common/principal/principal.types';
-import { LocationAccessLogRepository } from './location-access-log.repository';
+import { LocationAccessLogRepository } from '../../common/access-log/location-access-log.repository';
 
 const DEFAULT_LIMIT = 50;
 

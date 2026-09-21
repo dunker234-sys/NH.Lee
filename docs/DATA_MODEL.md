@@ -48,6 +48,86 @@ range 파티셔닝하며, `recorded_at`/`occurred_at` 같은 timestamptz 컬럼�
 `location_access_log`는 초기엔 미분할로 시작하고, 열람 빈도가 실측된 뒤
 분기 단위 파티셔닝 여부를 재검토한다.
 
+### 파티셔닝 유보 재확정 (STEP12 B2)
+
+위 유보 결정을 재검토했고, 여전히 **유보를 유지**한다. 근거:
+
+1. 현재 운영 데이터량이 파티셔닝을 정당화할 볼륨에 미달(아래 실측 참고).
+2. `punch_raw`는 append-only 트리거(`punch_raw_append_only`)가 걸려 있어,
+   파티션 테이블로 전환하려면 PK를 `(id, work_date)` 복합키로 바꾸는
+   무중단 운영 중 고위험 마이그레이션이 필요하다(§51 참고 주석).
+3. 요구사항 문구 자체가 "필요 시" 조건부다.
+
+**재검토 트리거 임계값** — 아래 중 하나라도 충족하면 파티셔닝 전환 작업을
+착수한다:
+
+| 테이블 | 재검토 트리거 | 근거 |
+|---|---|---|
+| `punch_raw` | 500만 행 초과 | 3,736명 × 3년 풀스케일 추정치(약 820만 행)의 약 60% 지점 — 월별 파티션 drop으로 3년 보존 정책을 걸기 전에 여유를 두고 전환 |
+| `access_log` | 1,000만 행 초과 또는 조회 P95가 200ms 초과 | 조회·일반 요청 전량 기록이라 가장 먼저 커질 테이블 |
+| `attendance_daily` | 300만 행 초과 | 400만 행 풀스케일 추정치의 75% 지점 |
+| `audit_log` | 분기별 100만 행 초과 | 해시 체인 검증 배치(`audit-merkle-seal`) 소요시간이 함께 늘어나는지 확인 후 결정 |
+
+### 3대 핵심 쿼리 패턴 EXPLAIN ANALYZE 실측 (STEP12 B2)
+
+로컬 PostgreSQL 17, `attendance_test` DB에 3,741명 × 최근 30일 합성 데이터
+(`punch_raw` 224,460행, `attendance_daily` 112,230행)를 적재해 실측했다
+(측정 후 데이터는 TRUNCATE로 원복). 대상은 실제 운영 부하가 가장 큰 3가지
+패턴:
+
+**① P95 타각 경로 — 일별 재계산의 `employee_id+work_date` 조회**
+(`attendance-input-builder.service.ts`의 `gatherEffectivePunches`가 매
+타각/일별 재계산마다 실행)
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM punch_raw
+WHERE employee_id = $1 AND work_date = current_date
+ORDER BY recorded_at ASC;
+```
+
+`punch_raw_employee_id_work_date_idx`로 Index Scan, **Execution Time 0.097ms**.
+Planning Time(7.96ms)이 오히려 더 크게 잡힌 것은 첫 실행 시 플랜 캐시가
+비어 있었기 때문 — 실제 운영에서는 prepared statement 캐싱으로 무시할
+수준. 인덱스가 정확히 의도대로 쓰이고 있어 추가 조치 불필요.
+
+**② 주간/월간 배치 팬아웃 — 직원별 기간 범위 조회(최근 30일)**
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM punch_raw
+WHERE employee_id = $1 AND work_date BETWEEN $2 AND $3
+ORDER BY recorded_at ASC;
+```
+
+`punch_raw_employee_id_recorded_at_idx`를 Bitmap Index Scan으로 사용,
+**Execution Time 0.321ms**(60행). 옵티마이저가 `employee_id_work_date_idx`
+대신 `employee_id_recorded_at_idx`를 골랐는데, 범위 조건이 `work_date`에
+걸려 있어도 결과 정렬(`ORDER BY recorded_at`)과 맞아떨어지는 후자가 더
+저렴하다고 판단한 것 — 두 인덱스 모두 이미 존재하므로 추가 조치 불필요.
+월간 배치(3,736명 팬아웃)에서 이 쿼리가 동시성 10으로 반복 실행되는데,
+단건이 0.3ms 수준이므로 배치 전체 소요시간은 재계산 로직(순수 함수 계산)
+쪽이 병목이지 이 쿼리가 병목이 아님을 확인했다(B1의 3,741명 풀스케일
+실측 13.2초와 정합).
+
+**③ 대시보드 집계 — 사업장 당일 출근 인원(`DISTINCT employee_id`)**
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT employee_id FROM punch_raw
+WHERE work_date = current_date AND punch_type = 'IN' AND site_id = $1;
+```
+
+`punch_raw_site_id_work_date_idx`로 Bitmap Index Scan 후 HashAggregate,
+**Execution Time 2.067ms**(3,740행 반환). `punch_type`은 이 인덱스에
+포함돼 있지 않아 Filter 단계에서 걸러지지만(Rows Removed by Filter: 3,740),
+데이터량 대비 비용이 낮아 실용적으로 문제없다. 이 지점이 재검토 임계값
+(`access_log` 1,000만 행/P95 200ms)에 준하는 부담을 보이면
+`(site_id, work_date, punch_type)` 3컬럼 인덱스 추가를 우선 검토한다.
+
+**결론**: 3개 패턴 모두 기존 인덱스만으로 밀리초 단위 응답 — B4 부하테스트의
+`POST /punches` P95(<1초) 여유분에서 DB 쿼리 자체는 병목이 아님을 뒷받침한다.
+
 > **참고**: Postgres에서 파티션 테이블은 PK/UNIQUE 제약이 파티션 키를 포함해야
 > 한다. 실제 전환 시 `punch_raw`의 PK를 `(id, work_date)` 복합키로,
 > `idempotency_key` UNIQUE를 `(idempotency_key, work_date)`로 바꿔야 한다

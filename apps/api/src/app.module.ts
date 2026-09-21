@@ -2,7 +2,10 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import { AccessLogModule } from './common/access-log/access-log.module';
+import { EmployeeProtectedStatusModule } from './common/employee-protected-status/employee-protected-status.module';
 import { ApprovalModule } from './modules/approval/approval.module';
 import { AuditIntegrityModule } from './modules/audit-integrity/audit-integrity.module';
 import { CorrectionModule } from './modules/correction/correction.module';
@@ -13,6 +16,8 @@ import { ComplianceReportsModule } from './modules/compliance-reports/compliance
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { HrSyncModule } from './modules/hr-sync/hr-sync.module';
 import { PayrollCloseModule } from './modules/payroll-close/payroll-close.module';
+import { RetentionModule } from './modules/retention/retention.module';
+import { OpsMonitoringModule } from './modules/ops-monitoring/ops-monitoring.module';
 import { AuditLogModule } from './common/audit/audit-log.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -52,9 +57,13 @@ import { SystemBatchModule } from './modules/system-batch/system-batch.module';
         connection: { host: config.get<string>('redis.host'), port: config.get<number>('redis.port') },
       }),
     }),
+    // STEP12: 전역 기본 rate limit(분당 300req/IP). 더 엄격/관대한 값이
+    // 필요한 엔드포인트(로그인, 타각)는 각 컨트롤러에서 @Throttle로 재정의한다.
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 300 }]),
     PrismaModule,
     AuditLogModule,
     AccessLogModule,
+    EmployeeProtectedStatusModule,
     PrincipalModule,
     ScopeModule,
     PunchModule,
@@ -80,11 +89,16 @@ import { SystemBatchModule } from './modules/system-batch/system-batch.module';
     DashboardModule,
     HrSyncModule,
     PayrollCloseModule,
+    RetentionModule,
+    OpsMonitoringModule,
   ],
   providers: [
-    // 실행 순서: JwtAuthGuard(토큰 검증) → PrincipalGuard(DB에서 principal/scope
+    // 실행 순서: ThrottlerGuard(rate limit, 인증 전에 넘치는 요청부터 걸러
+    // 낸다) → JwtAuthGuard(토큰 검증) → PrincipalGuard(DB에서 principal/scope
     // 재계산 + 비밀번호 변경 강제) → RolesGuard(역할 게이트). @Public()으로
-    // 셋 다 우회 가능.
+    // 나머지 셋은 우회 가능하지만 ThrottlerGuard는 @Public() 엔드포인트
+    // (로그인 등)에도 그대로 적용된다 — 오히려 그게 목적이다.
+    { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PrincipalGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

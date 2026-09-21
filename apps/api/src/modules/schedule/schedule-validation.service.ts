@@ -15,6 +15,7 @@ import {
   checkPlannedBreakSufficiency,
 } from '@attendance/core-rules';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { EmployeeProtectedStatusRepository } from '../../common/employee-protected-status/employee-protected-status.repository';
 import { SchedulePolicy, SchedulePolicyResolverService } from '../../common/policy/schedule-policy-resolver.service';
 import { SiteLaborAgreementResolverService } from '../../common/policy/site-labor-agreement-resolver.service';
 import { deriveWorkDateString } from '../../common/time/work-date.util';
@@ -58,6 +59,7 @@ export class ScheduleValidationService {
     private readonly policyResolver: SchedulePolicyResolverService,
     private readonly agreementResolver: SiteLaborAgreementResolverService,
     private readonly aggregation: ScheduleAggregationService,
+    private readonly protectedStatusRepo: EmployeeProtectedStatusRepository,
   ) {}
 
   /**
@@ -102,15 +104,10 @@ export class ScheduleValidationService {
       }
 
       const isMinor = ageAsOf(employee.birthDate, new Date(`${workDate}T00:00:00.000Z`)) < 18;
-      const protectedStatus = await this.prisma.employeeProtectedStatus.findFirst({
-        where: {
-          employeeId: target.employeeId,
-          statusType: 'PREGNANCY',
-          effectiveStartDate: { lte: new Date(`${workDate}T00:00:00.000Z`) },
-          OR: [{ effectiveEndDate: null }, { effectiveEndDate: { gte: new Date(`${workDate}T00:00:00.000Z`) } }],
-        },
+      const protectedStatuses = await this.protectedStatusRepo.findActiveDecrypted(target.employeeId, {
+        asOfDate: new Date(`${workDate}T00:00:00.000Z`),
       });
-      const worker: WorkerProfile = { isMinor, isPregnant: protectedStatus != null };
+      const worker: WorkerProfile = { isMinor, isPregnant: protectedStatuses.some((s) => s.statusType === 'PREGNANCY') };
       const agreementInPlace = await this.agreementResolver.hasActiveFlexibleWorkAgreement(
         target.siteId,
         new Date(`${workDate}T00:00:00.000Z`),
@@ -220,15 +217,8 @@ export class ScheduleValidationService {
 
         const flexType = [...flexTypes][0] as string;
         const isMinor = birthDate ? ageAsOf(birthDate, dateOnly(weekStart)) < 18 : true;
-        const protectedStatus = await this.prisma.employeeProtectedStatus.findFirst({
-          where: {
-            employeeId,
-            statusType: 'PREGNANCY',
-            effectiveStartDate: { lte: dateOnly(weekStart) },
-            OR: [{ effectiveEndDate: null }, { effectiveEndDate: { gte: dateOnly(weekStart) } }],
-          },
-        });
-        const worker: WorkerProfile = { isMinor, isPregnant: protectedStatus != null };
+        const protectedStatuses = await this.protectedStatusRepo.findActiveDecrypted(employeeId, { asOfDate: dateOnly(weekStart) });
+        const worker: WorkerProfile = { isMinor, isPregnant: protectedStatuses.some((s) => s.statusType === 'PREGNANCY') };
         const agreementInPlace = await this.agreementResolver.hasActiveFlexibleWorkAgreement(empTargets[0].siteId, dateOnly(weekStart), flexType);
 
         try {

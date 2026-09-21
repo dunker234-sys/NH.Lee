@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma/prisma.service';
+import { EmployeeProtectedStatusRepository } from '../../common/employee-protected-status/employee-protected-status.repository';
 import { dateOnly } from '../../common/time/week.util';
 
 /** §60⑥ 출근 간주 기간에 해당하는 EmployeeProtectedStatus.statusType 값 —
@@ -13,19 +13,17 @@ export const DEEMED_ATTENDANCE_STATUS_TYPES = [
 
 @Injectable()
 export class LeaveDeemedAttendanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly protectedStatusRepo: EmployeeProtectedStatusRepository) {}
 
   /** [periodStart, periodEnd] 구간 안에서 §60⑥ 출근간주 기간과 겹치는
    * 일수를 계산한다(요구사항서4.3 §1 — 결근 처리하면 연차가 과소 산정됨). */
   async countDeemedAttendanceDays(employeeId: string, periodStart: string, periodEnd: string): Promise<number> {
-    const rows = await this.prisma.employeeProtectedStatus.findMany({
-      where: {
-        employeeId,
-        statusType: { in: [...DEEMED_ATTENDANCE_STATUS_TYPES] },
-        effectiveStartDate: { lte: dateOnly(periodEnd) },
-        OR: [{ effectiveEndDate: null }, { effectiveEndDate: { gte: dateOnly(periodStart) } }],
-      },
+    const candidates = await this.protectedStatusRepo.findActiveDecrypted(employeeId, {
+      periodStart: dateOnly(periodStart),
+      periodEnd: dateOnly(periodEnd),
     });
+    const deemedTypes: readonly string[] = DEEMED_ATTENDANCE_STATUS_TYPES;
+    const rows = candidates.filter((r) => deemedTypes.includes(r.statusType));
 
     const periodStartMs = dateOnly(periodStart).getTime();
     const periodEndMs = dateOnly(periodEnd).getTime();

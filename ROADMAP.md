@@ -637,18 +637,74 @@ STEP10 `HrSyncBatch`/`HrSyncBatchRow` 패턴을 재사용(`PayrollCloseBatch`/
 507.3ms로 통과 포함). admin-web UI는 이번 1차 구현 범위 밖(STEP6.5~10 선례와 동일한
 결정, 사용자 확정).
 
-## STEP 12. 보안 · 성능 · 배포
+## STEP 12. 보안 · 성능 · 배포 ⚠️ 부분 완료 (RTO 실측 1건 잔여)
 
-OWASP Top 10 점검, 위치정보 파기 배치(retention_job 롤, punch_location만 삭제,
-audit_log 기록), 위치정보법 부수 의무(확인자료/일시중지/열람정정/철회 파기) 확인,
-부하 테스트(피크 분당 500건), Docker/IaC/GitHub Actions, RPO 15분/RTO 4시간,
-운영 문서(매뉴얼/런북/파일럿 체크리스트).
+OWASP Top 10 점검(helmet/throttler/CORS allowlist/body limit, `main.ts`),
+위치정보 파기 배치(`retention_job` 전용 DB 롤 — 구조적으로 `punch_raw` 쓰기
+불가, `punch_location`만 청크 삭제 + `audit_log` 1건 기록, 매일 03:00 KST),
+위치정보법 부수 의무(§16② 확인자료는 `LocationAccessLogRepository.
+recordMany()`, §24② 일시중지·§24③ 열람은 기존 구현 유지, §24④ 철회 시
+즉시파기는 `PunchLocationRetentionTriggerService`), `EmployeeProtectedStatus.
+statusType` AES-256-GCM 암호화(신규 `PII_ENCRYPTION_KEY`, 결정론적 암호화가
+아니므로 3개 호출부를 "복호화 후 애플리케이션 필터링"으로 전환), 신규
+월간 재계산 배치(`monthly-recalc-batch-*`, weekly 패턴 복제), 부하 테스트
+(`punch-load-performance.e2e-spec.ts`, 분당 500건 피크 시뮬레이션),
+Docker(api/admin-web/kiosk Dockerfile + docker-compose.yml) + Terraform
+(VPC/RDS/Redis/ECS Fargate/ALB/Secrets Manager, `apply` 없이 IaC로만) +
+GitHub Actions(test→build→staging→승인 후 운영), 운영 모니터링 엔드포인트
+(6개 지표), 운영 문서 5종.
+
+핵심 설계 결정: `RetentionPrismaService`를 기본 `PrismaService`와 완전히
+분리된 별도 `PrismaClient`(`retention_job` DB 역할로 인증)로 두어, 파기
+배치가 구조적으로 `punch_raw`를 건드릴 수 없게 했다(DB 롤 권한이 유일한
+방어선, CLAUDE.md 절대 규칙 1과 동일한 원칙). `EmployeeProtectedStatus.
+statusType` 암호화는 AES-256-GCM의 랜덤 IV 때문에 SQL 등치/IN 필터가
+불가능해지는 문제를, 결정론적 암호화(보안 약화)로 우회하지 않고 "후보를
+날짜 범위로만 조회 후 복호화·메모리 필터링"으로 해결했다(극소수 행이라
+성능 영향 없음). 상세 설계는 `C:\Users\user\.claude\plans\
+cheeky-sparking-reef.md` 참고.
 
 **완료 조건**
-- 부하 테스트 P95 1초 이내 유지
-- 위치정보 파기 배치 정상 실행, punch_raw는 그대로 남음
-- 복구 훈련으로 RTO 4시간 이내 검증
-- 파일럿 체크리스트 문서 작성
+- [x] 부하 테스트 P95 1초 이내 유지 — `test/punch-load-performance.
+  e2e-spec.ts`(분당 500건 피크 지속), P95<1초 통과. 기존
+  `punches-p95.e2e-spec.ts`(100건 동시 버스트)·`weekly-recalc-batch-
+  performance`·신규 `monthly-recalc-batch-performance`(3,741명 풀스케일,
+  13.2초)도 이번 STEP의 미들웨어/큐 추가 이후 재확인, 회귀 없음
+- [x] 위치정보 파기 배치 정상 실행, punch_raw는 그대로 남음 —
+  `test/punch-location-retention.e2e-spec.ts`(7개)+`retention-job-role-
+  boundary.e2e-spec.ts`(5개, `retention_job` 커넥션으로 `punch_raw`
+  UPDATE/DELETE 시도 시 구조적 거부 확인) 통과
+- [ ] **복구 훈련으로 RTO 4시간 이내 검증 — 부분 완료.** 로컬 네이티브
+  PostgreSQL 17에서 WAL 아카이빙(`archive_mode`/`archive_command`) 실제
+  동작과 `pg_basebackup` 물리 백업까지는 실제로 수행·성공을 확인했으나,
+  scratch 클러스터를 실제로 기동해 WAL 리플레이 복구를 완료하고 실측
+  wall-clock RTO를 기록하는 마지막 단계는 이 개발 머신의 엔드포인트 보안
+  소프트웨어(카스퍼스키로 추정)가 서비스 컨텍스트 밖의 `postgres.exe`
+  실행을 차단해 완료하지 못했다. 사용자 확인: **다른 PC에서 이어서 완료
+  후 문서를 갱신**하기로 함 — 상세 원인·재현 절차·잔여 작업은
+  `docs/DISASTER_RECOVERY.md` §3~5 참고
+- [x] 파일럿 체크리스트 문서 작성 — `docs/PILOT_CHECKLIST.md`
+  (ROADMAP 부록 B를 실행 가능한 체크리스트로 승격, §5 항목이 위 RTO
+  잔여 작업과 연결됨)
+
+부수적으로 확인한 것: STEP12 Section A(보안)+B(성능) 코드 변경에 대한 전체
+58개 e2e 회귀 배치 재실행(8배치+2건 재검증) 전부 통과, `express`/`helmet`/
+`@nestjs/throttler`를 phantom dependency에서 명시적 direct dependency로
+전환(런타임 크래시 수정), `AppThrottlerGuard`(NODE_ENV=test 시 우회)로
+테스트 버스트 트래픽이 레이트리밋에 걸리지 않게 함. 운영 문서 5종
+(`docs/ADMIN_MANUAL.md`, `WORKER_QUICK_GUIDE.md`, `INCIDENT_RUNBOOK.md`,
+`DISASTER_RECOVERY.md`, `PILOT_CHECKLIST.md`) 및 `docs/DATA_MODEL.md`의
+파티셔닝 유보 재확정(재검토 임계값 명문화)+3대 쿼리 패턴 EXPLAIN ANALYZE
+실측 섹션 신규 작성. Terraform은 `apply` 없이 IaC 전체 작성, `terraform`/
+`docker` CLI가 이 환경에 없어 문법 수준(괄호 균형·YAML 파싱) 검증까지만
+수행 — `infra/terraform/README.md`에 실 계정 연결 후 절차 명시.
+
+**다음 세션에서 처리할 잔여 항목**:
+1. 다른 PC에서 RTO 실측 완료 → `docs/DISASTER_RECOVERY.md` §5 채우기 →
+   이 항목 [x]로 전환
+2. `migrator` DB 롤에 드릴용으로 임시 부여한 `REPLICATION`/`pg_checkpoint`/
+   `pg_switch_wal` EXECUTE 권한 원복(`docs/DISASTER_RECOVERY.md` §7의
+   SQL 실행, postgres 슈퍼유저 인증 필요)
 
 ---
 

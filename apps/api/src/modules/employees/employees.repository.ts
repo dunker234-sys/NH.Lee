@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Employee } from '@prisma/client';
+import { EmployeeProtectedStatusRepository } from '../../common/employee-protected-status/employee-protected-status.repository';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrgScope } from '../../common/scope/org-scope.types';
 import { assertScope, assertSiteInScope } from '../../common/scope/scope.util';
@@ -10,7 +11,10 @@ import { assertScope, assertSiteInScope } from '../../common/scope/scope.util';
  */
 @Injectable()
 export class EmployeesRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly protectedStatusRepo: EmployeeProtectedStatusRepository,
+  ) {}
 
   async findMany(scope: OrgScope, filter: { siteId?: string } = {}): Promise<Employee[]> {
     assertScope(scope);
@@ -63,15 +67,12 @@ export class EmployeesRepository {
     if (!employee) throw new NotFoundException({ code: 'EMPLOYEE_NOT_FOUND' });
     assertSiteInScope(scope, employee.primarySiteId);
 
-    const created = await this.prisma.employeeProtectedStatus.create({
-      data: {
-        employeeId,
-        statusType: input.statusType,
-        effectiveStartDate: input.effectiveStartDate,
-        effectiveEndDate: input.effectiveEndDate,
-        declaredBy,
-      },
+    return this.protectedStatusRepo.create({
+      employeeId,
+      statusType: input.statusType,
+      effectiveStartDate: input.effectiveStartDate,
+      effectiveEndDate: input.effectiveEndDate,
+      declaredBy,
     });
-    return { id: created.id };
   }
 }

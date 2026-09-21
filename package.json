@@ -7,8 +7,10 @@
     "prisma:generate": "pnpm --filter @attendance/api exec prisma generate",
     "prisma:migrate": "pnpm --filter @attendance/api exec prisma migrate dev",
     "prisma:seed": "pnpm --filter @attendance/api exec prisma db seed",
-    "build:packages": "pnpm --filter @attendance/shared-types build",
+    "build:packages": "pnpm --filter @attendance/shared-types build && pnpm --filter @attendance/core-rules build",
     "test:api": "pnpm build:packages && pnpm --filter @attendance/api test",
-    "test:api:e2e": "pnpm build:packages && pnpm --filter @attendance/api test:e2e"
+    "test:api:e2e": "pnpm build:packages && pnpm --filter @attendance/api test:e2e",
+    "test:core-rules": "pnpm --filter @attendance/core-rules test",
+    "typecheck:api": "pnpm build:packages && pnpm --filter @attendance/api exec tsc --noEmit"
   }
 }

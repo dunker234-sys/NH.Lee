@@ -1,0 +1,105 @@
+# STEP12: docker-compose(로컬) — 이 저장소의 실제 개발 머신은 Postgres/Redis를
+# 네이티브 서비스로 돌리므로(docs/DATA_MODEL.md 참고, Docker 미사용) 이
+# compose 파일은 "다른 환경"(CI, Linux 개발 머신, 신규 합류자)을 위한
+# 대체 로컬 스택이다 — 이 저장소의 실제 로컬 개발 절차를 바꾸지 않는다.
+#
+# 실행: docker compose -f infra/docker-compose.yml up --build
+# (빌드 컨텍스트가 저장소 루트를 가리키므로 반드시 이 경로로 실행한다.)
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_dev_password
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # roles.sql은 DB 생성 + 롤 3종(app_rw/migrator/retention_job) 생성까지만
+      # 한다 — 테이블이 아직 없어 GRANT 대상이 없는 roles_post_migrate.sql은
+      # 여기서 실행할 수 없다(migrate 서비스가 마이그레이션 이후에 적용).
+      - ../apps/api/prisma/roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 1회성 잡: 마이그레이션 적용 → roles_post_migrate.sql → 시드. api 서비스는
+  # 이 서비스가 성공적으로 끝난 뒤에만 뜬다(service_completed_successfully).
+  migrate:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MIGRATOR_DATABASE_URL: "postgresql://migrator:migrator_dev_password@postgres:5432/attendance?schema=public"
+      APP_DATABASE_URL: "postgresql://app_rw:app_rw_dev_password@postgres:5432/attendance?schema=public"
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: "postgresql://app_rw:app_rw_dev_password@postgres:5432/attendance?schema=public&connection_limit=40"
+      RETENTION_JOB_DATABASE_URL: "postgresql://retention_job:retention_job_dev_password@postgres:5432/attendance?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_ACCESS_SECRET: "compose-local-only-access-secret-change-me"
+      JWT_REFRESH_SECRET: "compose-local-only-refresh-secret-change-me"
+      # 개발용 값 — 절대 운영에 쓰지 않는다(openssl rand -hex 32로 새로 생성).
+      QR_TOTP_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      PII_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
+      CORS_ALLOWED_ORIGINS: ""
+
+  admin-web:
+    build:
+      context: ..
+      dockerfile: apps/admin-web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: "http://localhost:3000"
+    depends_on:
+      - api
+    ports:
+      - "3100:3100"
+    environment:
+      PORT: "3100"
+
+  kiosk:
+    build:
+      context: ..
+      dockerfile: apps/kiosk/Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres-data:

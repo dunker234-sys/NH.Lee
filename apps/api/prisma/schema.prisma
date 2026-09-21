@@ -375,19 +375,25 @@ model EmployeeSiteAssignment {
 // 4가지는 근로자가 "신청"하는 휴가 유형(LeaveType)이 아니라 사유 발생 시
 // HR이 등록하는 신상 상태라 의미상으로도 이 테이블이 맞다.
 model EmployeeProtectedStatus {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  employeeId         String    @map("employee_id") @db.Uuid
-  statusType         String    @map("status_type") // 'PREGNANCY' 등, 자유 문자열(확장 여지)
-  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
-  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
-  declaredBy         String    @map("declared_by") @db.Uuid // HQ_HR만(서비스 레이어 role 체크)
-  declaredAt         DateTime  @default(now()) @map("declared_at") @db.Timestamptz(6)
-  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId String @map("employee_id") @db.Uuid
+  // STEP12: 'PREGNANCY' 등 민감 보호상태를 AES-256-GCM(PII_ENCRYPTION_KEY)으로
+  // 암호화해 저장한다. GCM은 IV가 매번 랜덤이라 암호문 등치 비교가 불가능하므로
+  // SQL WHERE 절 조건으로 걸 수 없다 — EmployeeProtectedStatusRepository가
+  // employeeId+유효기간만으로 후보를 가져와 애플리케이션에서 복호화 후
+  // 필터링한다(common/employee-protected-status/ 참고).
+  statusTypeEncrypted String    @map("status_type_encrypted")
+  effectiveStartDate  DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate    DateTime? @map("effective_end_date") @db.Date
+  declaredBy          String    @map("declared_by") @db.Uuid // HQ_HR만(서비스 레이어 role 체크)
+  declaredAt          DateTime  @default(now()) @map("declared_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   employee           Employee @relation("ProtectedStatusOf", fields: [employeeId], references: [id])
   declaredByEmployee Employee @relation("ProtectedStatusDeclaredBy", fields: [declaredBy], references: [id])
 
-  @@index([employeeId, statusType, effectiveStartDate])
+  // statusType은 암호화되어 인덱스 선두 컬럼으로 쓸 수 없다 — employeeId+유효기간만 인덱싱한다.
+  @@index([employeeId, effectiveStartDate])
   @@map("employee_protected_status")
 }
 
@@ -822,6 +828,9 @@ model AttendanceMonthly {
   employee Employee @relation(fields: [employeeId], references: [id])
 
   @@unique([employeeId, yearMonth])
+  // STEP12: 월간 배치 팬아웃/월마감 조회가 "이 달 전체" 단위로 스캔한다 —
+  // 기존 유니크 인덱스는 employeeId가 선두 컬럼이라 이 패턴에 못 쓴다.
+  @@index([yearMonth])
   @@map("attendance_monthly")
 }
 

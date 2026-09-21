@@ -1,0 +1,55 @@
+name: Mobile CI
+
+# STEP12: apps/mobile(Expo/React Native)은 컨테이너화 대상이 아니다 — 별도
+# 워크플로로 typecheck/test/expo export까지만 검증한다. EAS 클라우드 빌드는
+# 이 세션에 EXPO_TOKEN 시크릿이 없어 실행할 수 없다 — 조건부로 건너뛴다.
+# 실제 팀이 EXPO_TOKEN 시크릿을 등록하고 저장소 변수 EXPO_TOKEN_CONFIGURED를
+# 'true'로 설정하면 eas-build job이 활성화된다(수동 후속 설정 항목).
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/mobile/**']
+  pull_request:
+    paths: ['apps/mobile/**']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '9.15.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @attendance/mobile typecheck
+      - run: pnpm --filter @attendance/mobile test
+      - name: expo export(빌드 아티팩트 검증 — 로컬 실행 가능, 크레덴셜 불필요)
+        working-directory: apps/mobile
+        run: npx expo export
+
+  eas-build:
+    needs: test
+    if: github.ref == 'refs/heads/main' && vars.EXPO_TOKEN_CONFIGURED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '9.15.0'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: EAS 빌드
+        working-directory: apps/mobile
+        run: eas build --platform all --non-interactive

@@ -1,0 +1,167 @@
+name: CI
+
+# STEP12: 테스트 → 빌드 → 스테이징 → 승인 후 운영. deploy-staging/production
+# 단계는 이 세션에 실제 클라우드 계정이 없어 자리표시자(placeholder)로만
+# 작성했다 — 실 배포는 AWS_ROLE_ARN/ECR_REPOSITORY/ECS_CLUSTER 등 시크릿을
+# 구성한 뒤 그 스텝을 채우면 된다. "승인 후 운영"은 GitHub Environments의
+# production 보호 규칙(Settings → Environments → production →
+# Required reviewers)으로 구현한다 — 코드로 강제할 수 없는 부분이라
+# 저장소 설정에서 별도로 켜야 한다(docs/ADMIN_MANUAL.md 참고).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '9.15.0'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build:packages
+
+      # docs/DATA_MODEL.md가 문서화한 배포 순서(roles.sql → migrate deploy →
+      # roles_post_migrate.sql → seed)를 CI에서도 그대로 따른다. attendance
+      # DB뿐 아니라 e2e가 쓰는 attendance_test DB에도 동일하게 적용한다.
+      - name: DB 롤 생성(roles.sql)
+        run: PGPASSWORD=postgres_ci_password psql -h localhost -U postgres -f apps/api/prisma/roles.sql
+
+      - name: attendance 마이그레이션 적용
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql://migrator:migrator_dev_password@localhost:5432/attendance?schema=public
+        run: npx prisma migrate deploy
+
+      - name: attendance roles_post_migrate.sql 적용
+        run: PGPASSWORD=migrator_dev_password psql -h localhost -U migrator -d attendance -v ON_ERROR_STOP=1 -f apps/api/prisma/roles_post_migrate.sql
+
+      - name: attendance_test 생성 + 마이그레이션 + 권한
+        env:
+          PGPASSWORD: postgres_ci_password
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE attendance_test OWNER migrator;"
+          cd apps/api
+          DATABASE_URL=postgresql://migrator:migrator_dev_password@localhost:5432/attendance_test?schema=public npx prisma migrate deploy
+          PGPASSWORD=migrator_dev_password psql -h localhost -U migrator -d attendance_test -v ON_ERROR_STOP=1 -f prisma/roles_post_migrate.sql
+
+      - name: core-rules 단위테스트(커버리지 90% 임계 포함)
+        run: pnpm --filter @attendance/core-rules test:coverage
+
+      - name: apps/api 타입체크
+        run: pnpm --filter @attendance/api exec tsc --noEmit
+
+      - name: apps/api 단위테스트
+        run: pnpm --filter @attendance/api test
+
+      - name: apps/api e2e 테스트
+        working-directory: apps/api
+        env:
+          TEST_DATABASE_URL: postgresql://migrator:migrator_dev_password@localhost:5432/attendance_test?schema=public
+        run: pnpm test:e2e
+
+      - name: admin-web lint + typecheck
+        run: |
+          pnpm --filter @attendance/admin-web lint
+          pnpm --filter @attendance/admin-web typecheck
+
+      - name: kiosk typecheck + 단위테스트
+        run: |
+          pnpm --filter @attendance/kiosk typecheck
+          pnpm --filter @attendance/kiosk test
+
+      # STEP12 §A6 시크릿 관리: 하드코딩된 시크릿 회귀를 CI에서 자동 차단한다.
+      - name: 시크릿 스캔
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+            target: runtime
+          - name: admin-web
+            dockerfile: apps/admin-web/Dockerfile
+            target: runtime
+          - name: kiosk
+            dockerfile: apps/kiosk/Dockerfile
+            target: runtime
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: ${{ matrix.name }} 이미지 빌드(레지스트리 push 없음 — 빌드 성공만 검증)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: false
+          tags: attendance-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: (placeholder) 스테이징 배포
+        run: |
+          echo "실 클라우드 계정 연결 후 이 스텝을 ECR push + ECS 서비스 업데이트로 채운다."
+          echo "필요 시크릿: AWS_ROLE_ARN, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE_STAGING"
+          echo "(infra/terraform 출력값과 대응 — infra/terraform/README.md 참고)"
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    # "승인 후 운영": GitHub Environments의 production 보호 규칙에
+    # Required reviewers를 설정해 두면, 이 job은 지정된 승인자가 실행을
+    # 승인하기 전까지 대기한다(저장소 Settings에서 별도 구성 필요).
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: (placeholder) 운영 배포
+        run: |
+          echo "실 클라우드 계정 연결 후 이 스텝을 ECR push + ECS 서비스 업데이트로 채운다."
+          echo "필요 시크릿: AWS_ROLE_ARN, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE_PRODUCTION"
