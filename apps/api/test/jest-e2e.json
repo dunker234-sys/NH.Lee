@@ -1,0 +1,10 @@
+{
+  "rootDir": ".",
+  "testRegex": ".*\\.e2e-spec\\.ts$",
+  "transform": {
+    "^.+\\.ts$": "ts-jest"
+  },
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "setupFiles": ["<rootDir>/setup/env.ts"],
+  "testTimeout": 30000
+}

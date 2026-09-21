@@ -1,0 +1,36 @@
+{
+  "name": "@attendance/core-rules",
+  "private": true,
+  "version": "0.0.0",
+  "description": "근로시간·연차 계산 순수 함수 엔진. DB·프레임워크 의존 금지.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^22.10.5",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
+    "typescript": "^5.7.2"
+  },
+  "jest": {
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": { "^.+\\.ts$": "ts-jest" },
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "collectCoverageFrom": ["**/*.ts", "!**/*.spec.ts", "!index.ts"],
+    "coverageDirectory": "<rootDir>/../coverage",
+    "coverageThreshold": {
+      "global": {
+        "branches": 90,
+        "functions": 90,
+        "lines": 90,
+        "statements": 90
+      }
+    }
+  }
+}

@@ -1,0 +1,247 @@
+:root {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-primary: #2563eb;
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+  --color-warning: #d97706;
+  --color-border: #334155;
+  font-family: 'Pretendard', 'Malgun Gothic', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  overflow: hidden; /* 키오스크는 스크롤이 필요 없는 단일 화면 */
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.kiosk-app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  gap: 24px;
+}
+
+.kiosk-title {
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.kiosk-subtitle {
+  color: var(--color-text-muted);
+  font-size: 16px;
+}
+
+.kiosk-banner {
+  border: 2px solid var(--color-warning);
+  border-radius: 12px;
+  padding: 16px 24px;
+  font-size: 16px;
+  text-align: center;
+  max-width: 640px;
+}
+
+/* --- 사번/PIN 입력 표시 --- */
+.field-display-row {
+  display: flex;
+  gap: 32px;
+}
+
+.field-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-display__label {
+  font-size: 16px;
+  color: var(--color-text-muted);
+}
+
+.field-display__value {
+  width: 220px;
+  height: 64px;
+  border: 3px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 32px;
+  letter-spacing: 6px;
+  text-align: center;
+  padding: 0 16px;
+  outline: none;
+}
+
+.field-display__value--active {
+  border-color: var(--color-primary);
+}
+
+/* --- 숫자 키패드 --- */
+.numeric-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 96px);
+  gap: 12px;
+}
+
+.numeric-keypad__key {
+  min-height: 72px;
+  border-radius: 16px;
+  border: none;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.numeric-keypad__key:active {
+  background: var(--color-primary);
+}
+
+.numeric-keypad__key--muted {
+  font-size: 16px;
+  color: var(--color-text-muted);
+}
+
+/* --- 출퇴근 버튼 --- */
+.punch-type-row {
+  display: flex;
+  gap: 16px;
+}
+
+.punch-type-button {
+  min-width: 160px;
+  min-height: 88px;
+  border-radius: 16px;
+  border: none;
+  font-size: 24px;
+  font-weight: 800;
+  background: var(--color-primary);
+  color: white;
+}
+
+.punch-type-button:disabled {
+  opacity: 0.4;
+}
+
+.punch-type-button--out {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 2px solid var(--color-border);
+}
+
+/* --- 결과 화면 --- */
+.result-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.result-screen__icon {
+  font-size: 96px;
+}
+
+.result-screen__title {
+  font-size: 36px;
+  font-weight: 800;
+}
+
+.result-screen__detail {
+  font-size: 18px;
+  color: var(--color-text-muted);
+}
+
+.result-screen--error .result-screen__title {
+  color: var(--color-danger);
+}
+
+.result-screen--offline .result-screen__title {
+  color: var(--color-warning);
+}
+
+/* --- 페어링 화면 --- */
+.pairing-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 480px;
+}
+
+.pairing-form input {
+  font-size: 20px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.pairing-form button {
+  font-size: 20px;
+  font-weight: 700;
+  padding: 16px;
+  border-radius: 12px;
+  border: none;
+  background: var(--color-primary);
+  color: white;
+}
+
+/* --- 상단 상태 표시줄 --- */
+.status-bar {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-bar__mode-toggle {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+/* --- QR 표시 화면 --- */
+.qr-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.qr-screen img {
+  width: 320px;
+  height: 320px;
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+}

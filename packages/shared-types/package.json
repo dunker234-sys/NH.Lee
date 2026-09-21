@@ -1,0 +1,14 @@
+{
+  "name": "@attendance/shared-types",
+  "private": true,
+  "version": "0.0.0",
+  "description": "백엔드·프런트 공유 타입 (DTO, enum 등). Prisma 클라이언트를 프런트에서 직접 import할 수 없어 여기서 손으로 미러링한다.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

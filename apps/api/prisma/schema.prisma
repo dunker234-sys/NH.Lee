@@ -1,0 +1,1558 @@
+// 전사 근태관리 시스템 — STEP 1 데이터 모델
+// CLAUDE.md 절대 규칙을 반드시 지킨다:
+//  - punch_raw는 append-only. Prisma 레벨에서도 update/delete를 호출하지 않는다.
+//    실제 강제는 DB 롤 권한(app_rw에서 UPDATE/DELETE 회수)으로 한다 (prisma/roles.sql).
+//    STEP8: punch_raw_append_only 트리거(migration.sql)가 보조 방어선으로
+//    추가됐다 — role 권한과 무관하게 UPDATE/DELETE 자체를 막는다. 스키마
+//    마이그레이션(컬럼 추가+backfill)이 필요하면 그 마이그레이션 안에서
+//    ALTER TABLE punch_raw DISABLE/ENABLE TRIGGER로 명시적으로 열고 닫는다.
+//  - 시점(instant)은 timestamptz, 근로일은 별도 date 컬럼(work_date)으로 저장한다.
+//  - 시간 값은 전부 정수 분(minutes)이다. 부동소수점을 쓰지 않는다.
+//  - 위치 좌표는 punch_raw가 아닌 punch_location에 분리 저장한다.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================================================
+// 1. 조직 · 인사
+// =========================================================================
+
+enum SiteStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum EmploymentType {
+  REGULAR // 정규
+  CONTRACT // 계약
+  PART_TIME // 단시간
+  ULTRA_PART_TIME // 초단시간
+  DAILY // 일용
+  DISPATCHED // 파견
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  RESIGNED
+}
+
+enum EmployeeRole {
+  EMPLOYEE
+  SITE_MANAGER
+  REGIONAL
+  HQ_HR
+  ADMIN
+  PARTNER
+}
+
+enum AssignmentRole {
+  PRIMARY // 주
+  SECONDARY // 부
+}
+
+enum HolidayType {
+  LEGAL // 법정공휴일
+  SUBSTITUTE // 대체공휴일
+  AGREED // 약정휴일
+  SITE_DESIGNATED // 사업장지정
+}
+
+enum HolidayScopeType {
+  ALL
+  SITE_LIST
+}
+
+model Region {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sites Site[]
+
+  @@map("region")
+}
+
+model Site {
+  id                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                  String     @unique
+  name                  String
+  regionId              String     @map("region_id") @db.Uuid
+  address               String?
+  // STEP4: 지오펜스 거리 계산의 기준점. 시드/기존 사업장은 NULL일 수 있고,
+  // 그 경우 지오펜스 판정 자체를 건너뛴다(§ GeofenceService 참고, 좌표 없는
+  // 사업장을 임의 좌표로 취급해 오판정하지 않는다).
+  lat                   Decimal?   @db.Decimal(9, 6)
+  lng                   Decimal?   @db.Decimal(9, 6)
+  geofenceRadiusM       Int        @default(100) @map("geofence_radius_m")
+  // 아래 두 컬럼은 조회 편의용 캐시일 뿐이다. 계산 엔진은 반드시
+  // site_headcount_history의 근로일 시점 값을 주입받아 사용해야 한다.
+  headcountCache        Int?       @map("headcount_cache")
+  isUnderFiveCache      Boolean?   @map("is_under_five_cache")
+  // STEP4: 사업장 고정 QR TOTP 공유키(AES-256-GCM 암호화 저장). 평문 유출 시
+  // 그 사업장 전체 타각을 무기한 위조할 수 있어 암호화한다.
+  qrTotpSecretEncrypted String?    @map("qr_totp_secret_encrypted")
+  qrTotpSecretUpdatedAt DateTime?  @map("qr_totp_secret_updated_at") @db.Timestamptz(6)
+  status                SiteStatus @default(ACTIVE)
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  region                   Region                     @relation(fields: [regionId], references: [id])
+  headcountHistory         SiteHeadcountHistory[]
+  holidayCalendarSites     HolidayCalendarSite[]
+  employees                Employee[]
+  siteAssignments          EmployeeSiteAssignment[]
+  shiftTemplates           ShiftTemplate[]
+  schedules                Schedule[]
+  punches                  PunchRaw[]
+  attendanceDaily          AttendanceDaily[]
+  policyConfigs            PolicyConfig[]
+  laborAgreements          LaborAgreement[]
+  workRules                WorkRule[]
+  payrollCloses            PayrollClose[]
+  originDispatches         DispatchRequest[]          @relation("DispatchOriginSite")
+  targetDispatches         DispatchRequest[]          @relation("DispatchTargetSite")
+  verificationSignals      SiteVerificationSignal[]
+  noShowTargets            NoShowNotificationTarget[]
+  kioskDevices             KioskDevice[]
+  ipAllowlist              SiteIpAllowlist[]
+  workNotProvidedJudgments WorkNotProvidedJudgment[]
+  delegations              Delegation[]
+  earlyClockInFlags        EarlyClockInPatternFlag[]
+  cutover                  SiteCutover?
+  nightWorkHealthCheckupStatuses NightWorkHealthCheckupStatus[]
+
+  @@index([regionId])
+  @@map("site")
+}
+
+model SiteHeadcountHistory {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId             String    @map("site_id") @db.Uuid
+  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
+  calcPeriodStart    DateTime  @map("calc_period_start") @db.Date
+  calcPeriodEnd      DateTime  @map("calc_period_end") @db.Date
+  totalPersonDays    Int       @map("total_person_days") // 연인원
+  workingDays        Int       @map("working_days") // 가동일수
+  averageHeadcount   Decimal   @map("average_headcount") @db.Decimal(6, 2)
+  isUnderFive        Boolean   @map("is_under_five")
+  leaveApplicable    Boolean   @map("leave_applicable") // 연차적용판정 (시행령 제7조의2③)
+  basis              String    @map("basis") @db.Text // 산정근거
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy          String?   @map("created_by") @db.Uuid
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([siteId, effectiveStartDate])
+  @@map("site_headcount_history")
+}
+
+model HolidayCalendar {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  year        Int
+  holidayDate DateTime         @map("holiday_date") @db.Date
+  holidayType HolidayType      @map("holiday_type")
+  name        String
+  isPaid      Boolean          @map("is_paid")
+  scopeType   HolidayScopeType @default(ALL) @map("scope_type")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sites HolidayCalendarSite[]
+
+  @@index([year])
+  @@index([holidayDate])
+  @@map("holiday_calendar")
+}
+
+model HolidayCalendarSite {
+  holidayCalendarId String @map("holiday_calendar_id") @db.Uuid
+  siteId            String @map("site_id") @db.Uuid
+
+  holidayCalendar HolidayCalendar @relation(fields: [holidayCalendarId], references: [id])
+  site            Site            @relation(fields: [siteId], references: [id])
+
+  @@id([holidayCalendarId, siteId])
+  @@map("holiday_calendar_site")
+}
+
+model Employee {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeNo            String         @unique @map("employee_no")
+  name                  String
+  employmentType        EmploymentType @map("employment_type")
+  hireDate              DateTime       @map("hire_date") @db.Date
+  resignationDate       DateTime?      @map("resignation_date") @db.Date
+  status                EmployeeStatus @default(ACTIVE)
+  primarySiteId         String         @map("primary_site_id") @db.Uuid
+  contractedWorkMinutes Int?           @map("contracted_work_minutes") // 주 소정근로시간(분)
+  role                  EmployeeRole   @default(EMPLOYEE)
+  // STEP4.5: 알림 템플릿 언어 선호. DB enum이 아니라 자유 문자열 — 지원
+  // 언어 목록의 단일 진실 소스는 notification-types.registry.ts이고, 모르는
+  // 값이면 ko로 폴백한다(법령 수치가 아니라 policy_config류의 엄격함 불필요).
+  locale                String         @default("ko")
+  // 협력사 코드 참조. STEP10: partner_company 테이블 모델링 완료.
+  partnerCompanyId      String?        @map("partner_company_id") @db.Uuid
+  // STEP6: 미성년(만 18세 미만) 판정용. null이면 판정 불가 — 유연/선택
+  // 근로제 배정 시 "허용"이 아니라 "차단"으로 취급한다(보수적 기본값).
+  birthDate             DateTime?      @map("birth_date") @db.Date
+  // STEP10: 인사연동 표준 스키마 필드. 전부 nullable — 인사시스템 미연동
+  // 상태(기존 시드 데이터 포함)와 호환한다.
+  department            String?        @map("department")
+  jobTitle              String?        @map("job_title")
+  managerId             String?        @map("manager_id") @db.Uuid
+  // 이 Employee 레코드가 인사시스템 피드 기준으로 유효했던 시점. 오래된
+  // 피드가 최신 수동정정/최근 동기화를 덮어쓰지 않도록 동기화 엔진이
+  // 이 값과 새 피드의 effectiveDate를 비교한다.
+  hrSourceEffectiveDate DateTime?      @map("hr_source_effective_date") @db.Date
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  primarySite                  Site                          @relation(fields: [primarySiteId], references: [id])
+  partnerCompany                PartnerCompany?               @relation(fields: [partnerCompanyId], references: [id])
+  manager                       Employee?                     @relation("EmployeeManager", fields: [managerId], references: [id])
+  directReports                 Employee[]                    @relation("EmployeeManager")
+  siteAssignments              EmployeeSiteAssignment[]
+  schedulesAssigned            Schedule[]                    @relation("ScheduleAssignee")
+  schedulesSubstituted         Schedule[]                    @relation("ScheduleSubstituteFor")
+  protectedStatuses            EmployeeProtectedStatus[]     @relation("ProtectedStatusOf")
+  protectedStatusesDeclared    EmployeeProtectedStatus[]     @relation("ProtectedStatusDeclaredBy")
+  punches                      PunchRaw[]
+  attendanceDaily              AttendanceDaily[]
+  attendanceWeekly             AttendanceWeekly[]
+  attendanceMonthly            AttendanceMonthly[]
+  overtimeRequests             OvertimeRequest[]             @relation("OvertimeRequester")
+  overtimeApprovals            OvertimeRequest[]             @relation("OvertimeApprover")
+  dispatchRequests             DispatchRequest[]
+  correctionRequests           CorrectionRequest[]
+  leaveBalances                LeaveBalance[]
+  leaveRequests                LeaveRequest[]
+  leaveApprovals               LeaveRequest[]                @relation("LeaveApprover")
+  compensatoryLeaveConversions CompensatoryLeaveConversion[]
+  payrollClosesClosed          PayrollClose[]
+  deviceTokens                 DeviceToken[]
+  consents                     Consent[]
+  locationAccessedLogs         LocationAccessLog[]
+  credential                   EmployeeCredential?
+  deviceBindings               DeviceBinding[]
+  refreshTokens                RefreshToken[]
+  noShowTargets                NoShowNotificationTarget[]
+  alertLogs                    AlertLog[]
+  workNotProvidedJudgments     WorkNotProvidedJudgment[]     @relation("WorkNotProvidedJudgedEmployee")
+  workNotProvidedJudgmentsMade WorkNotProvidedJudgment[]     @relation("WorkNotProvidedJudgedBy")
+  delegationsGiven             Delegation[]                  @relation("DelegationDelegator")
+  delegationsReceived          Delegation[]                  @relation("DelegationDelegate")
+  earlyClockInFlags            EarlyClockInPatternFlag[]     @relation("EarlyClockInEmployee")
+  earlyClockInFlagsResolved    EarlyClockInPatternFlag[]     @relation("EarlyClockInResolvedBy")
+  cutoversApproved             SiteCutover[]
+  migrationReconciliationRecords MigrationReconciliationRecord[]
+  nightWorkHealthCheckupStatus NightWorkHealthCheckupStatus?
+
+  @@index([primarySiteId])
+  @@index([partnerCompanyId])
+  @@index([managerId])
+  @@map("employee")
+}
+
+enum HrSyncTriggerType {
+  SYSTEM
+  MANUAL
+}
+
+enum HrSyncBatchStatus {
+  PENDING_REVIEW
+  AUTO_APPLIED
+  APPLIED
+  REJECTED
+}
+
+enum HrSyncRowChangeType {
+  NEW
+  CHANGED
+  DEPARTED
+  ERROR
+}
+
+/** STEP10: 인사시스템에 없는 파견·협력업체 인력 구분 코드. */
+model PartnerCompany {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String   @unique
+  name          String
+  contactName   String?  @map("contact_name")
+  contactEmail  String?  @map("contact_email")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  employees Employee[]
+
+  @@map("partner_company")
+}
+
+/**
+ * STEP10: 인사연동 배치 1회 실행 기록. dry-run 여부와 무관하게 실제 배치
+ * (run)는 항상 먼저 이 레코드를 만든다 — 리포트(대상/신규/변경/퇴사/오류)의
+ * 근거이자, changeRatio 임계값 초과 시 PENDING_REVIEW로 멈추는 지점이다.
+ */
+model HrSyncBatch {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  triggeredBy       HrSyncTriggerType @map("triggered_by")
+  status            HrSyncBatchStatus @map("status")
+  sourceAdapterType String            @map("source_adapter_type")
+  totalCount        Int               @map("total_count")
+  newCount          Int               @map("new_count")
+  changedCount      Int               @map("changed_count")
+  departedCount     Int               @map("departed_count")
+  errorCount        Int               @map("error_count")
+  changeRatio       Decimal           @map("change_ratio") @db.Decimal(6, 4)
+  appliedAt         DateTime?         @map("applied_at") @db.Timestamptz(6)
+  reviewedBy        String?           @map("reviewed_by") @db.Uuid
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  rows HrSyncBatchRow[]
+
+  @@index([createdAt])
+  @@map("hr_sync_batch")
+}
+
+/** STEP10: 배치 1건의 행 단위 상세 — 리포트 드릴다운 + 오류 사유. */
+model HrSyncBatchRow {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  batchId      String              @map("batch_id") @db.Uuid
+  employeeNo   String              @map("employee_no")
+  changeType   HrSyncRowChangeType @map("change_type")
+  beforeValue  Json?               @map("before_value")
+  afterValue   Json?               @map("after_value")
+  errorMessage String?             @map("error_message")
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch HrSyncBatch @relation(fields: [batchId], references: [id])
+
+  @@index([batchId])
+  @@map("hr_sync_batch_row")
+}
+
+model EmployeeSiteAssignment {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId     String         @map("employee_id") @db.Uuid
+  siteId         String         @map("site_id") @db.Uuid
+  assignmentRole AssignmentRole @map("assignment_role")
+  startDate      DateTime       @map("start_date") @db.Date
+  endDate        DateTime?      @map("end_date") @db.Date
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  site     Site     @relation(fields: [siteId], references: [id])
+
+  @@index([employeeId, siteId])
+  @@index([siteId, employeeId])
+  @@map("employee_site_assignment")
+}
+
+// STEP6: 임신 등 민감한 보호 상태를 Employee 본체와 분리 저장한다 — 일반
+// Employee 조회(목록, 엑셀 다운로드 등)에 민감정보가 섞여 들어가지 않게
+// 하고, 쓰기 권한을 HQ_HR로만 좁게 제한하기 위해서다(LaborAgreement와 같은
+// "유효기간 있는 별도 레코드" 패턴).
+// STEP7: 연차 출근율 산정 시 "출근 간주 기간"(§60⑥ — 업무상 부상질병
+// 휴업/출산전후휴가/육아휴직/육아기·임신기 근로시간 단축분)도 이 테이블에
+// statusType 값('INDUSTRIAL_INJURY_LEAVE'/'MATERNITY_LEAVE'/
+// 'CHILDCARE_LEAVE'/'REDUCED_WORKING_HOURS_CHILDCARE')으로 저장한다. 이
+// 4가지는 근로자가 "신청"하는 휴가 유형(LeaveType)이 아니라 사유 발생 시
+// HR이 등록하는 신상 상태라 의미상으로도 이 테이블이 맞다.
+model EmployeeProtectedStatus {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String    @map("employee_id") @db.Uuid
+  statusType         String    @map("status_type") // 'PREGNANCY' 등, 자유 문자열(확장 여지)
+  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
+  declaredBy         String    @map("declared_by") @db.Uuid // HQ_HR만(서비스 레이어 role 체크)
+  declaredAt         DateTime  @default(now()) @map("declared_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  employee           Employee @relation("ProtectedStatusOf", fields: [employeeId], references: [id])
+  declaredByEmployee Employee @relation("ProtectedStatusDeclaredBy", fields: [declaredBy], references: [id])
+
+  @@index([employeeId, statusType, effectiveStartDate])
+  @@map("employee_protected_status")
+}
+
+// =========================================================================
+// 1.5 인증 (STEP 2)
+// =========================================================================
+
+model EmployeeCredential {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId          String    @unique @map("employee_id") @db.Uuid
+  passwordHash        String    @map("password_hash")
+  mustChangePassword  Boolean   @default(true) @map("must_change_password")
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until") @db.Timestamptz(6)
+  passwordUpdatedAt   DateTime  @default(now()) @map("password_updated_at") @db.Timestamptz(6)
+  // STEP5-B: 키오스크 PIN — 비밀번호 잠금 카운터와 별도 컬럼군이다. PIN
+  // 무차별대입(현장 도보 공격)과 비밀번호 무차별대입(원격 공격)은 위협모델이
+  // 달라, 같은 카운터를 쓰면 키오스크 PIN 공격이 그 직원의 모바일 앱
+  // 비밀번호 로그인까지 잠가버리는 부작용이 생긴다. null이면 "PIN 미설정"
+  // (관리자가 아직 발급 안 함) — 일반 로그인 실패와 다른 사유로 구분한다.
+  pinHash             String?   @map("pin_hash")
+  pinFailedAttempts   Int       @default(0) @map("pin_failed_attempts")
+  pinLockedUntil      DateTime? @map("pin_locked_until") @db.Timestamptz(6)
+  pinSetAt            DateTime? @map("pin_set_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@map("employee_credential")
+}
+
+// 로그인 세션 신뢰(이 기기로 로그인해도 되는가) 개념이다. 기존 DeviceToken(FCM/APNs
+// 푸시 토큰 — "이 기기로 알림을 보낼 수 있는가")과는 별개다. 최초 로그인 기기는
+// 자동으로 trusted=true, 이후 새 기기는 trusted=false로 등록되지만 로그인 자체는
+// 차단하지 않는다(CLAUDE.md: 근로 사실 기록이 기기 교체로 막히면 안 된다).
+model DeviceBinding {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId   String    @map("employee_id") @db.Uuid
+  deviceId     String    @map("device_id")
+  trusted      Boolean   @default(false)
+  firstBoundAt DateTime  @default(now()) @map("first_bound_at") @db.Timestamptz(6)
+  lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  reviewedAt   DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy   String?   @map("reviewed_by") @db.Uuid
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, deviceId])
+  @@index([trusted])
+  @@map("device_binding")
+}
+
+model RefreshToken {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId        String    @map("employee_id") @db.Uuid
+  deviceId          String    @map("device_id")
+  // sha256(raw token) — bcrypt가 아니다. 리프레시 토큰은 이미 고엔트로피 랜덤값이라
+  // 느린 해시가 필요 없고, 오히려 유니크 인덱스로 바로 조회할 수 있어야 한다.
+  tokenHash         String    @unique @map("token_hash")
+  issuedAt          DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
+  // 회전 체인. 이미 폐기된(revokedAt 있음) 토큰 해시가 다시 들어오면 탈취 신호로
+  // 보고 이 직원·기기의 체인을 전부 무효화한다 (재사용 탐지).
+  replacedByTokenId String?   @unique @map("replaced_by_token_id") @db.Uuid
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, deviceId])
+  @@map("refresh_token")
+}
+
+// STEP5-B: 사업장에 사전 등록되는 공용 키오스크 물리 기기. DeviceBinding과
+// 다르다 — DeviceBinding은 "이 직원이 이 기기를 신뢰하는가"(1인:1기기 모델)를
+// 묻고, 이건 "이 기기가 이 사업장의 정식 등록 단말인가"(1기기:N직원, 하루
+// 수십 명이 교대로 씀)를 묻는다. id 자체가 punch_raw.deviceId로 그대로
+// 쓰인다.
+enum KioskDeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+model KioskDevice {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId         String            @map("site_id") @db.Uuid
+  label          String
+  // sha256(원본 페어링 토큰) — RefreshToken.tokenHash와 같은 이유로 bcrypt가
+  // 아니다: 이미 고엔트로피 랜덤값이라 느린 해시가 불필요하고, 매 타각마다
+  // O(1) 조회가 가능해야 한다(5초 예산).
+  credentialHash String            @unique @map("credential_hash")
+  status         KioskDeviceStatus @default(ACTIVE)
+  pairedAt       DateTime          @default(now()) @map("paired_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime?         @map("last_seen_at") @db.Timestamptz(6)
+  revokedAt      DateTime?         @map("revoked_at") @db.Timestamptz(6)
+  revokedBy      String?           @map("revoked_by") @db.Uuid
+  createdBy      String            @map("created_by") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([siteId])
+  @@map("kiosk_device")
+}
+
+// STEP5-B: 사업장별 PC 웹 타각 허용 IP 대역. policy_config가 아니다 — CIDR
+// 목록은 법령 수치·임계값(CLAUDE.md 절대 규칙4)이 아니라 구조적 접근제어
+// 설정이라 SiteVerificationSignal과 같은 "사업장 전용 보안 설정은 별도
+// 테이블" 선례를 따른다.
+model SiteIpAllowlist {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId    String   @map("site_id") @db.Uuid
+  cidr      String
+  label     String?
+  active    Boolean  @default(true)
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  @@index([siteId, active])
+  @@map("site_ip_allowlist")
+}
+
+// =========================================================================
+// 2. 근태 원본 · 집계
+// =========================================================================
+
+enum ScheduleAssignmentType {
+  INTERNAL_SUPPORT // 내부지원
+  OTHER_SITE_SUPPORT // 타사업장지원
+  DAILY_WORKER // 일용
+}
+
+enum ScheduleStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+enum PunchType {
+  IN
+  OUT
+  BREAK_OUT
+  BREAK_IN
+}
+
+enum VerificationLevel {
+  NORMAL
+  LOW
+}
+
+enum RegistrationMethod {
+  GPS
+  NFC
+  QR
+  PC
+  TABLET
+}
+
+enum AttendanceDailyStatus {
+  NORMAL
+  PENDING // 퇴근 타각 누락 등
+  UNAPPROVED_ACTUAL // 미승인 실적 존재
+  // STEP 3.5: reviewFlags(BREAK_NOT_GRANTED/BREAK_UNDER_PROVIDED/BREAK_IN_MISSING)는
+  // 있지만 UNAPPROVED_ACTUAL은 아닌 경우. 우선순위: UNAPPROVED_ACTUAL > REVIEW_REQUIRED > NORMAL.
+  REVIEW_REQUIRED
+  LOCKED // 마감됨
+}
+
+model ShiftTemplate {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId             String    @map("site_id") @db.Uuid
+  name               String
+  startTime          DateTime  @map("start_time") @db.Time(0)
+  endTime            DateTime  @map("end_time") @db.Time(0)
+  breakStartTime     DateTime? @map("break_start_time") @db.Time(0)
+  breakEndTime       DateTime? @map("break_end_time") @db.Time(0)
+  crossesMidnight    Boolean   @default(false) @map("crosses_midnight")
+  applicableWeekdays Int[]     @map("applicable_weekdays") // 1=월 ... 7=일
+  // STEP6: 이 템플릿으로 만든 배정이 유연/선택 근로제의 어떤 유형인지.
+  // null=표준(비유연) 근무. LaborAgreementResolverService가 이미 쓰는
+  // FLEXIBLE_WORK_AGREEMENT_TYPES와 같은 어휘를 쓴다. 매 스케줄 행마다
+  // 반복 지정하지 않고 템플릿(사업장이 그 유형으로 운영하기로 정한 반복
+  // 패턴)에 귀속시켜, Schedule.shiftTemplateId를 통해 자동 상속되게 한다.
+  flexibleWorkType   String?   @map("flexible_work_type")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  site      Site       @relation(fields: [siteId], references: [id])
+  schedules Schedule[]
+
+  @@index([siteId])
+  @@map("shift_template")
+}
+
+model Schedule {
+  id                      String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId              String                  @map("employee_id") @db.Uuid
+  siteId                  String                  @map("site_id") @db.Uuid
+  workDate                DateTime                @map("work_date") @db.Date
+  shiftTemplateId         String?                 @map("shift_template_id") @db.Uuid
+  plannedStartAt          DateTime                @map("planned_start_at") @db.Timestamptz(6)
+  plannedEndAt            DateTime                @map("planned_end_at") @db.Timestamptz(6)
+  plannedBreakMinutes     Int                     @default(0) @map("planned_break_minutes")
+  substituteForEmployeeId String?                 @map("substitute_for_employee_id") @db.Uuid
+  substituteReason        String?                 @map("substitute_reason")
+  assignmentType          ScheduleAssignmentType? @map("assignment_type")
+  version                 Int                     @default(1)
+  status                  ScheduleStatus          @default(DRAFT)
+  createdAt               DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee      Employee                   @relation("ScheduleAssignee", fields: [employeeId], references: [id])
+  substituteFor Employee?                  @relation("ScheduleSubstituteFor", fields: [substituteForEmployeeId], references: [id])
+  site          Site                       @relation(fields: [siteId], references: [id])
+  shiftTemplate ShiftTemplate?             @relation(fields: [shiftTemplateId], references: [id])
+  noShowTargets NoShowNotificationTarget[]
+
+  @@index([employeeId, workDate])
+  @@index([siteId, workDate])
+  @@map("schedule")
+}
+
+model PunchRaw {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId         String             @map("employee_id") @db.Uuid
+  siteId             String             @map("site_id") @db.Uuid
+  punchType          PunchType          @map("punch_type")
+  recordedAt         DateTime           @map("recorded_at") @db.Timestamptz(6)
+  receivedAt         DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
+  // Asia/Seoul 기준으로 서버가 산출해 저장한다. recorded_at에 대한 ::date 캐스팅 금지.
+  workDate           DateTime           @map("work_date") @db.Date
+  idempotencyKey     String             @unique @map("idempotency_key")
+  verificationLevel  VerificationLevel  @default(NORMAL) @map("verification_level")
+  registrationMethod RegistrationMethod @map("registration_method")
+  deviceId           String             @map("device_id")
+  integrityFlags     String[]           @map("integrity_flags")
+  clientEventId      String?            @map("client_event_id") // 추적용. 멱등키로 사용하지 않는다
+  receiveCount       Int                @default(1) @map("receive_count")
+  // STEP4: 지오펜스 이탈 사유 등 한 줄짜리 자유 텍스트. insert 시점에만 채우고
+  // 이후 절대 UPDATE하지 않는다(append-only와 충돌하지 않는다).
+  reviewNote         String?            @map("review_note")
+  // STEP8: integrityFlags.length를 insert 시점에 비정규화한 값(리포트용 집계
+  // 편의). append-only 트리거(punch_raw_append_only) 도입 후에도 "컬럼 추가+
+  // backfill" 마이그레이션이 정상 동작함을 그 마이그레이션 자체가 증명한다.
+  integrityFlagCount Int                @default(0) @map("integrity_flag_count")
+
+  employee           Employee            @relation(fields: [employeeId], references: [id])
+  site               Site                @relation(fields: [siteId], references: [id])
+  location           PunchLocation?
+  correctionRequests CorrectionRequest[]
+  fraudSignals       PunchFraudSignal[]
+
+  @@index([employeeId, workDate])
+  @@index([siteId, workDate])
+  // STEP4: 직전 타각 조회(이동속도 이상 탐지)
+  @@index([employeeId, recordedAt(sort: Desc)])
+  // STEP4: 동일 기기 다수 사번 탐지 — deviceId에 인덱스가 없으면 운영 규모에서 풀스캔이 된다.
+  @@index([deviceId, receivedAt])
+  @@map("punch_raw")
+}
+
+model PunchLocation {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  punchId          String    @unique @map("punch_id") @db.Uuid
+  lat              Decimal   @db.Decimal(9, 6)
+  lng              Decimal   @db.Decimal(9, 6)
+  accuracyM        Decimal   @map("accuracy_m") @db.Decimal(6, 2)
+  purgeScheduledAt DateTime  @map("purge_scheduled_at") @db.Date
+  purgedAt         DateTime? @map("purged_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  punch PunchRaw @relation(fields: [punchId], references: [id])
+
+  @@index([purgeScheduledAt])
+  @@map("punch_location")
+}
+
+// STEP4: NFC 태그 UID / QR 보조신호(Wi-Fi BSSID / Cell ID)를 타입 판별자
+// 하나로 통합한다 — 3개의 거의 동일한 테이블을 만들지 않는다.
+enum SiteVerificationSignalType {
+  NFC_TAG
+  WIFI_BSSID
+  CELL_ID
+}
+
+model SiteVerificationSignal {
+  id         String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId     String                     @map("site_id") @db.Uuid
+  signalType SiteVerificationSignalType @map("signal_type")
+  value      String
+  active     Boolean                    @default(true)
+  createdAt  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  site Site @relation(fields: [siteId], references: [id])
+
+  // 조회 인덱스를 겸한다: WHERE siteId=? AND signalType=? AND value=?
+  @@unique([siteId, signalType, value])
+  @@map("site_verification_signal")
+}
+
+// STEP4: 부정사용 비동기 탐지 결과. punch_raw는 append-only라 사후에 발견된
+// 신호를 원본에 얹을 수 없어 별도 테이블에 기록한다.
+enum FraudSignalType {
+  IMPOSSIBLE_TRAVEL_SPEED
+  REPEATED_EXACT_COORDINATES
+  SHARED_DEVICE_MULTIPLE_EMPLOYEES
+}
+
+model PunchFraudSignal {
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  punchId    String          @map("punch_id") @db.Uuid
+  employeeId String          @map("employee_id") @db.Uuid
+  signalType FraudSignalType @map("signal_type")
+  detail     Json
+  detectedAt DateTime        @default(now()) @map("detected_at") @db.Timestamptz(6)
+
+  punch PunchRaw @relation(fields: [punchId], references: [id])
+
+  @@index([punchId])
+  @@index([employeeId, detectedAt])
+  @@map("punch_fraud_signal")
+}
+
+// STEP4: 미등록(no-show) 감지 결과. 실제 발송은 STEP4.5의 NotificationService
+// 몫이라 의도적으로 최소화한다 — 수신자 목록을 여기서 미리 정하지 않는다.
+model NoShowNotificationTarget {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId String    @map("employee_id") @db.Uuid
+  siteId     String    @map("site_id") @db.Uuid
+  workDate   DateTime  @map("work_date") @db.Date
+  scheduleId String    @map("schedule_id") @db.Uuid
+  detectedAt DateTime  @default(now()) @map("detected_at") @db.Timestamptz(6)
+  notifiedAt DateTime? @map("notified_at") @db.Timestamptz(6) // STEP4는 항상 NULL로 생성, STEP4.5가 채운다
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  site     Site     @relation(fields: [siteId], references: [id])
+  schedule Schedule @relation(fields: [scheduleId], references: [id])
+
+  @@unique([employeeId, workDate])
+  @@index([siteId, workDate])
+  @@map("no_show_notification_target")
+}
+
+model AttendanceDaily {
+  id                        String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId                String                @map("employee_id") @db.Uuid
+  siteId                    String                @map("site_id") @db.Uuid
+  workDate                  DateTime              @map("work_date") @db.Date
+  scheduledWorkMinutes      Int                   @default(0) @map("scheduled_work_minutes")
+  actualWorkMinutes         Int                   @default(0) @map("actual_work_minutes")
+  approvedOvertimeMinutes   Int                   @default(0) @map("approved_overtime_minutes")
+  unapprovedOvertimeMinutes Int                   @default(0) @map("unapproved_overtime_minutes")
+  nightWorkMinutes          Int                   @default(0) @map("night_work_minutes")
+  holidayWorkMinutesNormal  Int                   @default(0) @map("holiday_work_minutes_normal")
+  holidayWorkMinutesExcess  Int                   @default(0) @map("holiday_work_minutes_excess")
+  breakMinutes              Int                   @default(0) @map("break_minutes")
+  latenessMinutes           Int                   @default(0) @map("lateness_minutes")
+  earlyLeaveMinutes         Int                   @default(0) @map("early_leave_minutes")
+  // STEP 3.5: core-rules DailyAttendanceResult에는 있었지만 STEP 1 스키마에는
+  // 담을 컬럼이 없던 두 값 (packages/core-rules/RULES.md §12 갭 참고).
+  paidLeaveMinutes          Int                   @default(0) @map("paid_leave_minutes")
+  scheduledExcessMinutes    Int                   @default(0) @map("scheduled_excess_minutes")
+  isAbsence                 Boolean               @default(false) @map("is_absence")
+  status                    AttendanceDailyStatus @default(PENDING)
+  // STEP7.5: 개시 데이터 이관이 심은 행인지 구분. MIGRATION 행은 항상
+  // status=LOCKED로 저장되고, 대응하는 PayrollClose가 CLOSED라 재계산
+  // 자체가 assertPayrollOpen()에서 막힌다(RecalculationService 참고).
+  source                    AttendanceRecordSource @default(CALCULATED)
+  calcVersion               Int                   @default(1) @map("calc_version")
+  calculatedAt              DateTime              @default(now()) @map("calculated_at") @db.Timestamptz(6)
+  inputSnapshotHash         String                @map("input_snapshot_hash")
+  breakdown                 Json                  @map("breakdown") // 산출 근거 배열
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  site     Site     @relation(fields: [siteId], references: [id])
+
+  @@unique([employeeId, workDate])
+  @@index([siteId, workDate])
+  @@map("attendance_daily")
+}
+
+// STEP9: 요구사항서 4.4② 알림 4단계. core-rules WeeklyAlertStage와 값이 1:1 대응한다.
+enum WeeklyAlertStage {
+  NONE
+  ATTENTION
+  WARNING
+  DANGER
+  EXCEEDED
+}
+
+model AttendanceWeekly {
+  id                             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId                     String   @map("employee_id") @db.Uuid
+  weekStartDate                  DateTime @map("week_start_date") @db.Date
+  totalWorkMinutes               Int      @default(0) @map("total_work_minutes")
+  over40Minutes                  Int      @default(0) @map("over_40_minutes")
+  limitViolationFlag             Boolean  @default(false) @map("limit_violation_flag")
+  // STEP 3.5: calculateWeeklyOvertimePay/determineWeeklyPaidRest 출력이 담길 곳이 없었다.
+  weeklyBasisOvertimeMinutes     Int      @default(0) @map("weekly_basis_overtime_minutes")
+  totalOvertimeForPremiumMinutes Int      @default(0) @map("total_overtime_for_premium_minutes")
+  weeklyPaidRestEligible         Boolean? @map("weekly_paid_rest_eligible")
+  // 이 주간에 활성 탄력적/선택적 근로제 합의가 있어 표준 52h 판정(위 세 필드)을
+  // 건너뛰었음을 명시한다. false로 방치하면 "판정했지만 위반 없음"과 구분이 안 된다.
+  flexibleWorkSkipped            Boolean  @default(false) @map("flexible_work_skipped")
+  // STEP9: WeeklyOvertimeAlertService.evaluateAndNotify()가 determineWeeklyAlertStage()
+  // 결과를 그대로 캐시한다 — 대시보드·준법 리포트가 매 요청마다 정책값을
+  // 다시 조회해 재계산하지 않고 이 컬럼만 읽도록(요구사항서 4.4⑥ 2초 이내).
+  // limitViolationFlag(=EXCEEDED와 동치)와 별개로 주의/경고/위험까지 구분해야
+  // 해서 새 컬럼이 필요했다.
+  alertStage                     WeeklyAlertStage @default(NONE) @map("alert_stage")
+  calcVersion                    Int      @default(1) @map("calc_version")
+  calculatedAt                   DateTime @default(now()) @map("calculated_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, weekStartDate])
+  @@index([weekStartDate, alertStage])
+  @@map("attendance_weekly")
+}
+
+model AttendanceMonthly {
+  id           String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId   String                 @map("employee_id") @db.Uuid
+  yearMonth    String                 @map("year_month") // "2026-08"
+  totals       Json                   @map("totals")
+  source       AttendanceRecordSource @default(CALCULATED)
+  calcVersion  Int                    @default(1) @map("calc_version")
+  calculatedAt DateTime               @default(now()) @map("calculated_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, yearMonth])
+  @@map("attendance_monthly")
+}
+
+// STEP7.5: LeaveBalanceSource(SYSTEM/MIGRATION)와 같은 어휘. attendance_daily/
+// attendance_monthly에는 이전까지 이 구분이 없었다 — 개시 데이터 이관이
+// 처음 도입한다.
+enum AttendanceRecordSource {
+  CALCULATED
+  MIGRATION
+}
+
+// =========================================================================
+// 3. 신청 · 워크플로우
+// =========================================================================
+
+enum OvertimeRequestType {
+  PRE
+  POST
+}
+
+enum OvertimeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum DispatchType {
+  BUSINESS_TRIP // 출장
+  SITE_SUPPORT // 지원
+}
+
+enum DispatchStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum CorrectionReasonCode {
+  PUNCH_MISSING // 타각 누락
+  DEVICE_ERROR // 기기 오류
+  NETWORK_FAILURE // 통신 장애
+  DISPATCH // 외근
+  LOCATION_ERROR // 위치 오차
+  SCHEDULE_CHANGE // 스케줄 변경
+  BREAK_NOT_GRANTED // 휴게 미부여 신고(STEP8, CLAUDE.md 절대 규칙 3)
+  OTHER
+}
+
+enum CorrectionRequestSource {
+  EMPLOYEE
+  ADMIN_DIRECT
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED_L1
+  APPROVED_L2
+  REJECTED
+}
+
+enum LeaveCategory {
+  ANNUAL // 연차
+  HALF_DAY // 반차
+  QUARTER_DAY // 반반차
+  CONGRATULATION // 경조
+  PUBLIC // 공가
+  SICK // 병가
+  UNPAID // 무급휴직
+  SUBSTITUTE // 대체휴무
+  COMPENSATORY // 보상휴가
+}
+
+enum LeaveDeductionUnit {
+  FULL_DAY
+  HALF_DAY
+  HOUR
+}
+
+enum LeaveUnit {
+  FULL
+  HALF_AM
+  HALF_PM
+  QUARTER
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  CANCEL_PENDING // STEP7: 사용 개시 이후 사후 취소 신청 — 관리자 승인 대기
+}
+
+// STEP7: 제61조① 촉진 절차의 두 웨이브 구분 — 제61조②(1년 미만자) 전용.
+// 최초 1년 종료 3개월 전 기준분(WAVE_A)과, 그 촉구 이후 추가로 발생한
+// 월별 연차(WAVE_B, 1개월 전 기준)는 법정 통지 기한이 서로 달라 하나의
+// LeavePromotionLog 절차로 합칠 수 없다.
+enum PromotionWave {
+  WAVE_A
+  WAVE_B
+}
+
+enum LeaveBalanceSource {
+  SYSTEM
+  MIGRATION
+}
+
+enum PromotionProcedureType {
+  ARTICLE_61_1 // 제61조① (1년 이상)
+  ARTICLE_61_2 // 제61조② (1년 미만)
+}
+
+enum PromotionStep {
+  FIRST_NOTICE
+  EMPLOYEE_RESPONSE
+  SECOND_NOTICE
+}
+
+enum NoticeMethod {
+  WRITTEN_PAPER
+  ELECTRONIC_DOCUMENT
+}
+
+model OvertimeRequest {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId          String                @map("employee_id") @db.Uuid
+  requestType         OvertimeRequestType   @map("request_type")
+  targetDate          DateTime              @map("target_date") @db.Date
+  expectedMinutes     Int                   @map("expected_minutes")
+  reason              String
+  status              OvertimeRequestStatus @default(PENDING)
+  approverId          String?               @map("approver_id") @db.Uuid
+  bulkApprovalBatchId String?               @map("bulk_approval_batch_id") @db.Uuid
+  version             Int                   @default(1)
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee                    Employee                     @relation("OvertimeRequester", fields: [employeeId], references: [id])
+  approver                    Employee?                    @relation("OvertimeApprover", fields: [approverId], references: [id])
+  compensatoryLeaveConversion CompensatoryLeaveConversion?
+
+  @@index([employeeId, targetDate])
+  @@index([bulkApprovalBatchId])
+  @@map("overtime_request")
+}
+
+model DispatchRequest {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId   String         @map("employee_id") @db.Uuid
+  originSiteId String         @map("origin_site_id") @db.Uuid
+  targetSiteId String?        @map("target_site_id") @db.Uuid
+  dispatchType DispatchType   @map("dispatch_type")
+  startDate    DateTime       @map("start_date") @db.Date
+  endDate      DateTime       @map("end_date") @db.Date
+  reason       String
+  isPostHoc    Boolean        @default(false) @map("is_post_hoc")
+  status       DispatchStatus @default(PENDING)
+  version      Int            @default(1)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  originSite Site     @relation("DispatchOriginSite", fields: [originSiteId], references: [id])
+  targetSite Site?    @relation("DispatchTargetSite", fields: [targetSiteId], references: [id])
+
+  @@index([employeeId, startDate])
+  @@map("dispatch_request")
+}
+
+// STEP6.5: 관리자가 "근로 미제공"으로 명시 판정한 근로일. 재판정/취소 API는
+// 두지 않는다 — (employeeId, workDate) 유니크 upsert 하나로 최초 판정과
+// 정정을 모두 처리하고, 이력은 audit_log의 전/후 값으로 남는다. version
+// 컬럼도 두지 않는다(동시 수정 충돌보다 "마지막 판정이 이긴다"가 실무에
+// 더 맞고, 어차피 감사로그가 손실 없이 남는다).
+model WorkNotProvidedJudgment {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  siteId     String   @map("site_id") @db.Uuid
+  workDate   DateTime @map("work_date") @db.Date
+  reason     String   @db.Text
+  judgedBy   String   @map("judged_by") @db.Uuid
+  judgedAt   DateTime @default(now()) @map("judged_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  employee         Employee @relation("WorkNotProvidedJudgedEmployee", fields: [employeeId], references: [id])
+  judgedByEmployee Employee @relation("WorkNotProvidedJudgedBy", fields: [judgedBy], references: [id])
+  site             Site     @relation(fields: [siteId], references: [id])
+
+  @@unique([employeeId, workDate])
+  @@index([siteId, workDate])
+  @@map("work_not_provided_judgment")
+}
+
+model CorrectionRequest {
+  id             String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId     String                  @map("employee_id") @db.Uuid
+  targetPunchId  String?                 @map("target_punch_id") @db.Uuid
+  targetWorkDate DateTime                @map("target_work_date") @db.Date
+  reasonCode     CorrectionReasonCode    @map("reason_code")
+  reasonDetail   String                  @map("reason_detail") @db.Text
+  beforeValue    Json?                   @map("before_value")
+  afterValue     Json                    @map("after_value")
+  evidenceUrl    String?                 @map("evidence_url")
+  requestSource  CorrectionRequestSource @default(EMPLOYEE) @map("request_source")
+  status         CorrectionStatus        @default(PENDING)
+  version        Int                     @default(1)
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  targetPunch PunchRaw? @relation(fields: [targetPunchId], references: [id])
+
+  @@index([employeeId, targetWorkDate])
+  @@map("correction_request")
+}
+
+model LeaveType {
+  id                               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                             String             @unique
+  name                             String
+  category                         LeaveCategory
+  paid                             Boolean
+  deductionUnit                    LeaveDeductionUnit @map("deduction_unit")
+  evidenceRequired                 Boolean            @default(false) @map("evidence_required")
+  // STEP7: null=신청 기한 없음. "유형별... 신청 기한을 설정으로 관리"(요구사항서4.3 §2).
+  applicationDeadlineDaysBeforeUse Int?               @map("application_deadline_days_before_use")
+  createdAt                        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  leaveBalances LeaveBalance[]
+  leaveRequests LeaveRequest[]
+
+  @@map("leave_type")
+}
+
+model LeaveBalance {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String             @map("employee_id") @db.Uuid
+  leaveTypeId     String             @map("leave_type_id") @db.Uuid
+  referencePeriod String             @map("reference_period") // 예: "2026" 또는 "2026-08~2027-07"
+  // STEP7: §61 촉진 절차의 기한은 전부 "소멸(만료) 몇 개월/일 전" 기준으로
+  // 계산된다 — 그 계산의 유일한 앵커. effectiveDate는 이 잔액의 발생일(§60①
+  // "1년의 근로를 마친 다음 날" 등).
+  effectiveDate   DateTime           @map("effective_date") @db.Date
+  expiryDate      DateTime           @map("expiry_date") @db.Date
+  grantedDays     Decimal            @default(0) @map("granted_days") @db.Decimal(5, 2)
+  usedDays        Decimal            @default(0) @map("used_days") @db.Decimal(5, 2)
+  carriedOverDays Decimal            @default(0) @map("carried_over_days") @db.Decimal(5, 2)
+  expiredDays     Decimal            @default(0) @map("expired_days") @db.Decimal(5, 2)
+  basis           Json               @map("basis") // 산출 근거 — 근로자 본인 조회 대상(요구사항서4.3 §4)
+  source          LeaveBalanceSource @default(SYSTEM)
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee                     Employee                      @relation(fields: [employeeId], references: [id])
+  leaveType                    LeaveType                     @relation(fields: [leaveTypeId], references: [id])
+  promotionLogs                LeavePromotionLog[]
+  leaveRequests                LeaveRequest[]
+  compensatoryLeaveConversions CompensatoryLeaveConversion[]
+
+  @@unique([employeeId, leaveTypeId, referencePeriod])
+  @@map("leave_balance")
+}
+
+model LeaveRequest {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId     String             @map("employee_id") @db.Uuid
+  leaveTypeId    String             @map("leave_type_id") @db.Uuid
+  startDate      DateTime           @map("start_date") @db.Date
+  endDate        DateTime           @map("end_date") @db.Date
+  unit           LeaveUnit          @default(FULL)
+  reason         String?
+  status         LeaveRequestStatus @default(PENDING)
+  approverId     String?            @map("approver_id") @db.Uuid
+  // STEP7: 승인 시점에 실제 차감된 대상 LeaveBalance 행 + 차감 일수를 확정
+  // 저장한다 — 이후 정책이 바뀌어도 재계산하지 않고 취소 시 이 값 그대로
+  // 복원한다(모호성 제거).
+  leaveBalanceId String?            @map("leave_balance_id") @db.Uuid
+  deductedDays   Decimal            @default(0) @map("deducted_days") @db.Decimal(5, 2)
+  version        Int                @default(1)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  employee     Employee      @relation(fields: [employeeId], references: [id])
+  leaveType    LeaveType     @relation(fields: [leaveTypeId], references: [id])
+  approver     Employee?     @relation("LeaveApprover", fields: [approverId], references: [id])
+  leaveBalance LeaveBalance? @relation(fields: [leaveBalanceId], references: [id])
+
+  @@index([employeeId, startDate])
+  @@map("leave_request")
+}
+
+model LeavePromotionLog {
+  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leaveBalanceId   String                 @map("leave_balance_id") @db.Uuid
+  procedureType    PromotionProcedureType @map("procedure_type")
+  step             PromotionStep
+  // STEP7: ARTICLE_61_2에서만 사용 — 촉구 전/후 발생분 구분(요구사항서4.3 §5).
+  wave             PromotionWave?
+  noticeDate       DateTime               @map("notice_date") @db.Date
+  // STEP7: 배치가 계산해 채우는 이 단계의 법정/정책 기한 — 준수 여부 판정의 기준값.
+  dueDate          DateTime               @map("due_date") @db.Date
+  unusedDaysAtStep Decimal                @default(0) @map("unused_days_at_step") @db.Decimal(5, 2)
+  method           NoticeMethod
+  sentAt           DateTime?              @map("sent_at") @db.Timestamptz(6)
+  receivedAt       DateTime?              @map("received_at") @db.Timestamptz(6)
+  responseContent  String?                @map("response_content") @db.Text
+  requirementMet   Boolean                @default(false) @map("requirement_met")
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  leaveBalance LeaveBalance @relation(fields: [leaveBalanceId], references: [id])
+
+  @@index([leaveBalanceId])
+  @@map("leave_promotion_log")
+}
+
+// STEP7: §57 보상휴가 환산 이력. 가산율 반영 환산(연장1h→1.5h 등)의 근거를
+// 감사 가능하게 남긴다. sourceOvertimeRequestId 유니크 = 같은 연장근로
+// 건을 두 번 보상휴가로 전환하는 것을 DB 레벨에서 막는다(체불 방지).
+model CompensatoryLeaveConversion {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId               String   @map("employee_id") @db.Uuid
+  sourceOvertimeRequestId  String?  @unique @map("source_overtime_request_id") @db.Uuid
+  sourceWorkDate           DateTime @map("source_work_date") @db.Date
+  sourceCategory           String   @map("source_category") // OVERTIME|NIGHT|HOLIDAY_WITHIN_8H|HOLIDAY_EXCESS_8H
+  sourceMinutes            Int      @map("source_minutes")
+  appliedPremiumRate       Decimal  @map("applied_premium_rate") @db.Decimal(4, 3)
+  compensatoryLeaveMinutes Int      @map("compensatory_leave_minutes")
+  leaveBalanceId           String   @map("leave_balance_id") @db.Uuid
+  convertedBy              String   @map("converted_by") @db.Uuid
+  convertedAt              DateTime @default(now()) @map("converted_at") @db.Timestamptz(6)
+
+  employee        Employee         @relation(fields: [employeeId], references: [id])
+  overtimeRequest OvertimeRequest? @relation(fields: [sourceOvertimeRequestId], references: [id])
+  leaveBalance    LeaveBalance     @relation(fields: [leaveBalanceId], references: [id])
+
+  @@index([employeeId, sourceWorkDate])
+  @@map("compensatory_leave_conversion")
+}
+
+// STEP6.5: 결재선 대결/위임. 인가 게이트가 아니라 알림 라우팅 전용이다 —
+// 기존 @Roles()+OrgScope 모델이 이미 "그 사업장을 관할하는 관리자라면 누구나
+// 승인 가능"을 보장하므로, 이 테이블에 버그가 있어도 정당한 관리자의 승인
+// 자체를 막지 않는다.
+enum DelegationStatus {
+  ACTIVE
+  REVOKED
+}
+
+model Delegation {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  delegatorId        String           @map("delegator_id") @db.Uuid
+  delegateId         String           @map("delegate_id") @db.Uuid
+  siteId             String?          @map("site_id") @db.Uuid // null = delegator 전체 스코프
+  reason             String
+  effectiveStartDate DateTime         @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime?        @map("effective_end_date") @db.Date
+  status             DelegationStatus @default(ACTIVE)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  revokedAt          DateTime?        @map("revoked_at") @db.Timestamptz(6)
+
+  delegator Employee @relation("DelegationDelegator", fields: [delegatorId], references: [id])
+  delegate  Employee @relation("DelegationDelegate", fields: [delegateId], references: [id])
+  site      Site?    @relation(fields: [siteId], references: [id])
+
+  @@index([delegatorId, effectiveStartDate])
+  @@index([delegateId, effectiveStartDate])
+  @@map("delegation")
+}
+
+// STEP9: 야간작업 특수건강진단 대상자 판정 결과(산안법 §130, 시행규칙
+// 별표22 제4호). 직원당 최신 판정 1건만 유지한다(월 단위 배치가 갱신) —
+// attendance_weekly처럼 "현재 상태" 테이블이지 이력 테이블이 아니다.
+// 대시보드·리포트가 2초 이내 조회해야 하므로(요구사항서 4.4⑥) 6개월치
+// punch_raw를 매번 다시 훑지 않고 이 사전 계산 결과를 읽는다.
+model NightWorkHealthCheckupStatus {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId              String   @unique @map("employee_id") @db.Uuid
+  siteId                  String   @map("site_id") @db.Uuid
+  windowEndDate           DateTime @map("window_end_date") @db.Date
+  criterion1Count         Int      @map("criterion1_count")
+  criterion1Met           Boolean  @map("criterion1_met")
+  criterion2TotalMinutes  Int      @map("criterion2_total_minutes")
+  criterion2Met           Boolean  @map("criterion2_met")
+  eligible                Boolean
+  calculatedAt            DateTime @default(now()) @map("calculated_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+  site     Site     @relation(fields: [siteId], references: [id])
+
+  @@index([siteId, eligible])
+  @@map("night_work_health_checkup_status")
+}
+
+// STEP6.5: 조기출근 월별 반복 탐지 결과. NoShowNotificationTarget("하루
+// 1건" 모델)과 모양이 달라 재사용하지 않는다 — 이건 "월 단위 집계 + 정리
+// 여부 추적"이다.
+model EarlyClockInPatternFlag {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String    @map("employee_id") @db.Uuid
+  siteId          String    @map("site_id") @db.Uuid
+  yearMonth       String    @map("year_month")
+  occurrenceCount Int       @map("occurrence_count")
+  detectedAt      DateTime  @default(now()) @map("detected_at") @db.Timestamptz(6)
+  resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy      String?   @map("resolved_by") @db.Uuid
+  resolutionNote  String?   @map("resolution_note") @db.Text
+
+  employee           Employee  @relation("EarlyClockInEmployee", fields: [employeeId], references: [id])
+  site               Site      @relation(fields: [siteId], references: [id])
+  resolvedByEmployee Employee? @relation("EarlyClockInResolvedBy", fields: [resolvedBy], references: [id])
+
+  @@unique([employeeId, yearMonth])
+  @@index([siteId, yearMonth])
+  @@map("early_clock_in_pattern_flag")
+}
+
+// =========================================================================
+// 4. 정책 · 거버넌스
+// =========================================================================
+
+enum PayrollCloseStatus {
+  OPEN
+  CLOSED
+  RECLOSED
+}
+
+model PolicyConfig {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key                String
+  value              Json
+  siteId             String?   @map("site_id") @db.Uuid // NULL = 전사 기본값
+  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
+  createdBy          String?   @map("created_by") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  site Site? @relation(fields: [siteId], references: [id])
+
+  // 진짜 유니크 제약(NULL=전사 기본값 1개, 사업장별 1개)은 site_id가 NULL을
+  // 허용해 표준 @@unique로 표현이 안 되므로, 부분 유니크 인덱스로 별도 추가한다
+  // (마이그레이션 후속 SQL 참고: 20260818_policy_config_partial_unique).
+  @@index([key, siteId, effectiveStartDate])
+  @@map("policy_config")
+}
+
+model LaborAgreement {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId             String?   @map("site_id") @db.Uuid // NULL = 전사
+  agreementType      String    @map("agreement_type") // 유연근로 종류/보상휴가 등
+  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
+  documentReference  String    @map("document_reference")
+  signedDate         DateTime  @map("signed_date") @db.Date
+  representativeName String    @map("representative_name")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  site Site? @relation(fields: [siteId], references: [id])
+
+  @@index([siteId, agreementType])
+  @@map("labor_agreement")
+}
+
+model WorkRule {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId             String?   @map("site_id") @db.Uuid
+  version            Int
+  effectiveStartDate DateTime  @map("effective_start_date") @db.Date
+  effectiveEndDate   DateTime? @map("effective_end_date") @db.Date
+  documentReference  String    @map("document_reference")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  site Site? @relation(fields: [siteId], references: [id])
+
+  @@index([siteId])
+  @@map("work_rule")
+}
+
+model PayrollClose {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId          String             @map("site_id") @db.Uuid
+  periodYearMonth String             @map("period_year_month")
+  status          PayrollCloseStatus @default(OPEN)
+  closedAt        DateTime?          @map("closed_at") @db.Timestamptz(6)
+  closedBy        String?            @map("closed_by") @db.Uuid
+  version         Int                @default(1)
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  site             Site      @relation(fields: [siteId], references: [id])
+  closedByEmployee Employee? @relation(fields: [closedBy], references: [id])
+
+  @@unique([siteId, periodYearMonth])
+  @@map("payroll_close")
+}
+
+// STEP7.5: 개시 데이터 이관 — 사업장의 개통 상태. SiteStatus(ACTIVE/CLOSED)와는
+// 다른 축이라 Site에 플래그를 얹지 않고 SiteHeadcountHistory/LeavePromotionLog
+// 처럼 별도 테이블로 둔다. cutoverDate는 법령 수치가 아닌 사업장별 운영
+// 일자라 policy_config가 아니라 이 테이블의 컬럼이다(CLAUDE.md 절대 규칙4는
+// 법령 수치·임계값에 대한 규칙).
+enum SiteCutoverStatus {
+  PENDING // 기준일만 설정됨. 이관/대사 진행 중일 수 있음
+  APPROVED // HQ_HR/ADMIN 승인 = 개통 완료
+}
+
+model SiteCutover {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId      String            @unique @map("site_id") @db.Uuid
+  cutoverDate DateTime          @map("cutover_date") @db.Date
+  status      SiteCutoverStatus @default(PENDING)
+  approvedAt  DateTime?         @map("approved_at") @db.Timestamptz(6)
+  approvedBy  String?           @map("approved_by") @db.Uuid
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  site                  Site                            @relation(fields: [siteId], references: [id])
+  approvedByEmployee    Employee?                       @relation(fields: [approvedBy], references: [id])
+  reconciliationRecords MigrationReconciliationRecord[]
+
+  @@map("site_cutover")
+}
+
+// STEP7.5: 사업장 수기 집계 합계 대 이관 결과의 근로자 단위 차이. 사용자
+// 프롬프트의 "발생18-사용0=18일 표시되지만 실제는 7일" 문제를 그대로
+// 재현·검증할 수 있게, 자유 텍스트 지표 대신 결정적인 고정 2종만 다룬다.
+enum ReconciliationMetric {
+  ANNUAL_LEAVE_REMAINING_DAYS // grantedDays+carriedOverDays-usedDays-expiredDays 합
+  ATTENDANCE_MONTHLY_ACTUAL_MINUTES // 이관된 AttendanceMonthly.totals.actualWorkMinutes 합
+}
+
+model MigrationReconciliationRecord {
+  id            String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteCutoverId String               @map("site_cutover_id") @db.Uuid
+  siteId        String               @map("site_id") @db.Uuid
+  employeeId    String               @map("employee_id") @db.Uuid
+  metric        ReconciliationMetric
+  manualValue   Decimal              @map("manual_value") @db.Decimal(10, 2)
+  migratedValue Decimal              @map("migrated_value") @db.Decimal(10, 2)
+  diff          Decimal              @map("diff") @db.Decimal(10, 2) // manualValue - migratedValue
+  createdAt     DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  siteCutover SiteCutover @relation(fields: [siteCutoverId], references: [id])
+  employee    Employee    @relation(fields: [employeeId], references: [id])
+
+  @@unique([siteCutoverId, employeeId, metric])
+  @@index([siteId, diff])
+  @@map("migration_reconciliation_record")
+}
+
+// =========================================================================
+// 5. 알림 · 동의 · 감사
+// =========================================================================
+
+enum DeviceTokenPlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum ConsentType {
+  LOCATION_COLLECTION
+  // STEP4.5: 알림 수신 동의. LOCATION_COLLECTION과 달리 옵트인을 강제하는
+  // 법령이 없어 옵트아웃 기본(레코드 없음=수신 동의)으로 판정한다.
+  NOTIFICATION
+}
+
+enum ConsentStatus {
+  AGREED
+  PAUSED
+  WITHDRAWN
+}
+
+enum AccessLogResult {
+  SUCCESS
+  DENIED
+}
+
+model DeviceToken {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String              @map("employee_id") @db.Uuid
+  deviceId        String              @map("device_id")
+  platform        DeviceTokenPlatform
+  token           String
+  isValid         Boolean             @default(true) @map("is_valid")
+  lastRefreshedAt DateTime            @default(now()) @map("last_refreshed_at") @db.Timestamptz(6)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@unique([employeeId, deviceId, platform])
+  @@index([employeeId])
+  @@map("device_token")
+}
+
+model Consent {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId    String        @map("employee_id") @db.Uuid
+  consentType   ConsentType   @map("consent_type")
+  status        ConsentStatus
+  agreedAt      DateTime?     @map("agreed_at") @db.Timestamptz(6)
+  pausedAt      DateTime?     @map("paused_at") @db.Timestamptz(6)
+  withdrawnAt   DateTime?     @map("withdrawn_at") @db.Timestamptz(6)
+  policyVersion String        @map("policy_version")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@map("consent")
+}
+
+// STEP4.5: 알림 발송 이력. audit_log(상태 변경 이벤트 전용, 해시체인+Merkle,
+// 전역 advisory lock으로 직렬화 — STEP4가 100건 동시 요청 P95의 실제 병목으로
+// 실측한 바로 그 락)와 분리한다. 발송 이력은 access_log에 더 가까운 고빈도
+// 운영 로그다.
+enum AlertLogChannel {
+  PUSH
+  EMAIL
+  IN_APP
+}
+
+enum AlertLogResult {
+  PENDING
+  SUCCESS
+  FAILED_RETRYING
+  FAILED_FINAL
+  SUPPRESSED
+}
+
+// notificationType은 audit_log.eventType과 같은 관례로 고정 enum이 아니라
+// 자유 문자열이다. 알려진 값: DUMMY_TEST(STEP4.5 완료조건 증명용).
+model AlertLog {
+  id                  String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationType    String          @map("notification_type")
+  channel             AlertLogChannel
+  recipientEmployeeId String          @map("recipient_employee_id") @db.Uuid
+  targetPeriod        String          @default("") @map("target_period")
+  stage               String          @default("DEFAULT")
+  // sha256(canonicalJson({employeeId,type,channel,targetPeriod,stage})) —
+  // 이 유니크 제약이 "동일 알림 2회 요청해도 1회만 발송"의 유일한 방어선이다.
+  dedupKey            String          @unique @map("dedup_key")
+  locale              String
+  payload             Json
+  urgent              Boolean         @default(false)
+  result              AlertLogResult  @default(PENDING)
+  retryCount          Int             @default(0) @map("retry_count")
+  lastError           String?         @map("last_error") @db.Text
+  requestedAt         DateTime        @default(now()) @map("requested_at") @db.Timestamptz(6)
+  sentAt              DateTime?       @map("sent_at") @db.Timestamptz(6)
+  settledAt           DateTime?       @map("settled_at") @db.Timestamptz(6)
+
+  recipient Employee @relation(fields: [recipientEmployeeId], references: [id])
+
+  @@index([recipientEmployeeId, requestedAt])
+  @@index([notificationType, result])
+  @@map("alert_log")
+}
+
+// 위치정보법 제16조② 확인자료. access_log와 물리적으로 분리 — 보존·열람 요건이 다르다.
+model LocationAccessLog {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  employeeId      String   @map("employee_id") @db.Uuid
+  punchLocationId String?  @map("punch_location_id") @db.Uuid
+  accessedBy      String   @map("accessed_by") // 조회 주체: 사번 또는 'SYSTEM'
+  accessPurpose   String   @map("access_purpose")
+  accessedAt      DateTime @default(now()) @map("accessed_at") @db.Timestamptz(6)
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, accessedAt])
+  @@map("location_access_log")
+}
+
+// 조회·일반 요청. append-only, 해시 체인 없음.
+model AccessLog {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorPrincipal  String          @map("actor_principal") // 사번 또는 'SYSTEM'
+  actorRole       String          @map("actor_role")
+  orgScopeApplied Json            @map("org_scope_applied")
+  action          String
+  resourceType    String          @map("resource_type")
+  resourceId      String?         @map("resource_id") @db.Uuid
+  requestPath     String?         @map("request_path")
+  ipAddress       String?         @map("ip_address")
+  result          AccessLogResult @default(SUCCESS)
+  occurredAt      DateTime        @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([actorPrincipal, occurredAt])
+  @@index([resourceType, resourceId])
+  @@map("access_log")
+}
+
+// 상태 변경 이벤트 전용. 해시 체인 + 시간 단위 Merkle 루트로 무결성을 보장한다.
+// event_type/resource_type은 향후 STEP(정정, 휴가, 스케줄, 정책, 마감 등)에서
+// 계속 늘어나므로 고정 enum이 아니라 문자열로 두되, 알려진 값은 이 주석에 기록한다.
+// 알려진 event_type: CORRECTION_REQUESTED, CORRECTION_APPROVED, CORRECTION_REJECTED,
+// ADMIN_CORRECTION, UNAPPROVED_JUDGMENT,
+// PERMISSION_CHANGE, PAYROLL_CLOSE, PAYROLL_RECLOSE, POLICY_CHANGE, SCOPE_BYPASS,
+// LOGIN_SUCCESS, LOGIN_FAILED, ACCOUNT_LOCKED, PASSWORD_CHANGED, DEVICE_BOUND,
+// TOKEN_REUSE_DETECTED (STEP 2), MIGRATION_COMMIT, CUTOVER_APPROVED (STEP 7.5)
+model AuditLog {
+  seq            BigInt   @id @default(autoincrement())
+  actorPrincipal String   @map("actor_principal")
+  actorRole      String   @map("actor_role")
+  eventType      String   @map("event_type")
+  resourceType   String   @map("resource_type")
+  resourceId     String?  @map("resource_id") @db.Uuid
+  // STEP8: 이벤트가 "누구의 근태에 대한 것인지"(actorPrincipal=행위자와는 다를
+  // 수 있다 — 예: HQ_HR이 근로자 A의 정정을 승인). nullable — 과거 이벤트
+  // 타입은 채우지 않고 NULL로 남긴다(소급 backfill 없음, 이번 STEP부터 채움).
+  subjectEmployeeId String? @map("subject_employee_id") @db.Uuid
+  beforeValue    Json?    @map("before_value")
+  afterValue     Json?    @map("after_value")
+  reason         String?  @db.Text
+  prevHash       String?  @map("prev_hash")
+  recordHash     String   @map("record_hash")
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  // SYSTEM 주체가 스코프를 우회한 경우 대상 범위를 추적하기 위한 배치/작업 ID
+  jobId          String?  @map("job_id") @db.Uuid
+  scopeBypassed  Boolean  @default(false) @map("scope_bypassed")
+
+  @@index([resourceType, resourceId, occurredAt])
+  @@index([occurredAt])
+  @@index([subjectEmployeeId, occurredAt])
+  @@map("audit_log")
+}
+
+model AuditLogMerkleRoot {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  periodStart DateTime @map("period_start") @db.Timestamptz(6)
+  periodEnd   DateTime @map("period_end") @db.Timestamptz(6)
+  merkleRoot  String   @map("merkle_root")
+  recordCount Int      @map("record_count")
+  sealedAt    DateTime @default(now()) @map("sealed_at") @db.Timestamptz(6)
+  storageRef  String?  @map("storage_ref") // 별도 저장소(예: 오브젝트 스토리지)에 봉인된 위치
+
+  // STEP8: 봉인 배치가 같은 시간대를 중복 실행해도 멱등하도록 한다.
+  @@unique([periodStart, periodEnd])
+  @@index([periodStart, periodEnd])
+  @@map("audit_log_merkle_root")
+}

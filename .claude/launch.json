@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@attendance/api", "run", "start:dev"],
+      "port": 3000
+    },
+    {
+      "name": "kiosk",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@attendance/kiosk", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "admin-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@attendance/admin-web", "exec", "next", "dev", "-p", "3100"],
+      "port": 3100
+    }
+  ]
+}

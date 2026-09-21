@@ -1,0 +1,84 @@
+{
+  "name": "@attendance/api",
+  "private": true,
+  "version": "0.0.0",
+  "prisma": {
+    "seed": "ts-node --transpile-only prisma/seed.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/main.js",
+    "start:dev": "ts-node --transpile-only src/main.ts",
+    "test": "jest",
+    "test:e2e": "jest --config test/jest-e2e.json --runInBand",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:seed": "prisma db seed",
+    "prisma:studio": "prisma studio",
+    "seed:recalculation-policy": "ts-node --transpile-only prisma/seed-recalculation-policy.ts",
+    "seed:schedule-policy": "ts-node --transpile-only prisma/seed-schedule-policy.ts",
+    "seed:approval-policy": "ts-node --transpile-only prisma/seed-approval-policy.ts",
+    "seed:leave-policy": "ts-node --transpile-only prisma/seed-leave-policy.ts",
+    "seed:correction-policy": "ts-node --transpile-only prisma/seed-correction-policy.ts",
+    "seed:weekly-alert-policy": "ts-node --transpile-only prisma/seed-weekly-alert-policy.ts",
+    "seed:night-work-health-checkup-policy": "ts-node --transpile-only prisma/seed-night-work-health-checkup-policy.ts",
+    "seed:hr-sync-policy": "ts-node --transpile-only prisma/seed-hr-sync-policy.ts"
+  },
+  "dependencies": {
+    "@attendance/core-rules": "workspace:*",
+    "@attendance/shared-types": "workspace:*",
+    "@nestjs/bullmq": "^11.0.3",
+    "@nestjs/common": "^11.2.1",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.2.1",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "^11.2.1",
+    "@nestjs/swagger": "^11.4.7",
+    "@prisma/client": "^6.2.1",
+    "bcryptjs": "^3.0.3",
+    "bullmq": "^5.34.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.15.1",
+    "exceljs": "^4.4.0",
+    "iconv-lite": "^0.7.3",
+    "ioredis": "^5.4.2",
+    "joi": "^18.2.3",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "pg": "^8.23.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.1",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^29.5.14",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.10.5",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^6.0.2",
+    "jest": "^30.4.2",
+    "prisma": "^6.2.1",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  },
+  "jest": {
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    },
+    "moduleFileExtensions": [
+      "js",
+      "json",
+      "ts"
+    ],
+    "collectCoverageFrom": [
+      "**/*.(t|j)s"
+    ]
+  }
+}

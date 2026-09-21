@@ -1,0 +1,58 @@
+import { Module } from '@nestjs/common';
+import { ApprovalPolicyModule } from '../../common/policy/approval-policy.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { RecalculationModule } from '../recalculation/recalculation.module';
+import { ApprovalLineController } from './approval-line.controller';
+import { ApprovalLineResolverService } from './approval-line-resolver.service';
+import { ApprovalReportController } from './approval-report.controller';
+import { ApprovalReportService } from './approval-report.service';
+import { DelegationController } from './delegation.controller';
+import { DelegationService } from './delegation.service';
+import { DispatchApprovalController } from './dispatch-approval.controller';
+import { DispatchApprovalService } from './dispatch-approval.service';
+import { DispatchRequestController } from './dispatch-request.controller';
+import { DispatchRequestService } from './dispatch-request.service';
+import { EarlyClockInController } from './early-clockin.controller';
+import { EarlyClockInPatternService } from './early-clockin-pattern.service';
+import { OvertimeApprovalController } from './overtime-approval.controller';
+import { OvertimeApprovalService } from './overtime-approval.service';
+import { OvertimeRequestController } from './overtime-request.controller';
+import { OvertimeRequestService } from './overtime-request.service';
+import { PayrollCloseGuardService } from './payroll-close-guard.service';
+import { PayrollCloseReadinessController } from './payroll-close-readiness.controller';
+import { WorkNotProvidedController } from './work-not-provided.controller';
+import { WorkNotProvidedService } from './work-not-provided.service';
+
+@Module({
+  imports: [ApprovalPolicyModule, NotificationsModule, RecalculationModule],
+  controllers: [
+    OvertimeRequestController,
+    OvertimeApprovalController,
+    DispatchRequestController,
+    DispatchApprovalController,
+    WorkNotProvidedController,
+    DelegationController,
+    ApprovalLineController,
+    EarlyClockInController,
+    ApprovalReportController,
+    PayrollCloseReadinessController,
+  ],
+  providers: [
+    OvertimeRequestService,
+    OvertimeApprovalService,
+    DispatchRequestService,
+    DispatchApprovalService,
+    WorkNotProvidedService,
+    DelegationService,
+    ApprovalLineResolverService,
+    EarlyClockInPatternService,
+    ApprovalReportService,
+    PayrollCloseGuardService,
+  ],
+  // STEP11이 마감(PayrollClose) 처리 시 PayrollCloseGuardService.hasUnresolvedUnapprovedActuals()를
+  // 그대로 주입해 쓸 수 있도록 export한다. ApprovalLineResolverService는
+  // STEP7이 휴가 신청/촉진 알림 라우팅에 그대로 재사용한다(결재선을
+  // 다시 만들지 않는다).
+  exports: [PayrollCloseGuardService, ApprovalLineResolverService, ApprovalReportService],
+})
+export class ApprovalModule {}
