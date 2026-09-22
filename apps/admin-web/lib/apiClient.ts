@@ -17,7 +17,7 @@ export class ApiError extends Error {
 export class SessionExpiredError extends Error {}
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
 }
 
@@ -95,6 +95,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   return res.json();
 }
 
+/** 값이 있는 쿼리 파라미터만 URLSearchParams로 직렬화한다(undefined/빈 문자열은 생략). */
+export function buildQuery(params: Record<string, string | undefined>): string {
+  const usp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') usp.set(key, value);
+  }
+  const qs = usp.toString();
+  return qs ? `?${qs}` : '';
+}
+
 /** 엑셀 업로드 등 multipart/form-data 전용. Content-Type을 직접 지정하지
  * 않는다 — 브라우저가 boundary를 포함해 자동으로 채운다(직접 지정하면
  * boundary가 빠져 서버가 파싱하지 못한다). */
@@ -106,4 +116,11 @@ export async function apiFetchMultipart<T>(path: string, formData: FormData): Pr
   });
   if (!res.ok) throw new ApiError(res.status, await safeJson(res));
   return res.json();
+}
+
+/** 급여명세 엑셀/CSV 다운로드 등 바이너리 응답 전용(JSON이 아니라 Blob으로 받는다). */
+export async function apiFetchBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const res = await withAuthRetry((accessToken) => rawFetch(path, options, accessToken));
+  if (!res.ok) throw new ApiError(res.status, await safeJson(res));
+  return res.blob();
 }

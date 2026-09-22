@@ -2,17 +2,11 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { apiFetch, ApiError } from '../../../../lib/apiClient';
+import { ApiError } from '../../../../lib/apiClient';
+import { usePrincipal } from '../../../../lib/usePrincipal';
 import { sitesApi } from '../../../../lib/api/sitesApi';
 import { employeesApi } from '../../../../lib/api/employeesApi';
 import { employeeProtectedStatusApi } from '../../../../lib/api/employeeProtectedStatusApi';
-
-interface SessionPrincipal {
-  employeeId: string;
-  employeeNo: string;
-  role: string;
-  status: string;
-}
 
 // leave-deemed-attendance.service.ts(DEEMED_ATTENDANCE_STATUS_TYPES) +
 // schedule-validation.service.ts('PREGNANCY')에서 실제로 참조하는 값들.
@@ -178,11 +172,7 @@ function RegisterForm() {
  * SEC-3 근거와 동일: "다른 관리자 역할은 호출할 수 없다").
  * 조회(목록) API가 아직 없어 이 화면은 등록 전용이다. */
 export default function EmployeeProtectedStatusPage() {
-  const principalQuery = useQuery({
-    queryKey: ['auth', 'session'],
-    queryFn: () => apiFetch<{ principal: SessionPrincipal }>('/auth/session'),
-    staleTime: 5 * 60 * 1000,
-  });
+  const principalQuery = usePrincipal();
 
   if (principalQuery.isLoading) return <p className="text-slate-500">불러오는 중...</p>;
 

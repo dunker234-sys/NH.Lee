@@ -1,15 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '../../../lib/apiClient';
+import { usePrincipal } from '../../../lib/usePrincipal';
 import { opsMonitoringApi, type QueueHealth } from '../../../lib/api/opsMonitoringApi';
-
-interface SessionPrincipal {
-  employeeId: string;
-  employeeNo: string;
-  role: string;
-  status: string;
-}
 
 const ALLOWED_ROLES = new Set(['HQ_HR', 'ADMIN']);
 const RETENTION_QUEUE_NAME = 'punch-location-retention';
@@ -138,11 +131,7 @@ function MonitoringView() {
 /** STEP12 §B5. 백엔드 @Roles('HQ_HR','ADMIN')와 동일 기준으로 화면에서도
  * 가드한다 — 다른 역할은 API가 403을 주기 전에 안내 메시지로 막는다. */
 export default function OpsMonitoringPage() {
-  const principalQuery = useQuery({
-    queryKey: ['auth', 'session'],
-    queryFn: () => apiFetch<{ principal: SessionPrincipal }>('/auth/session'),
-    staleTime: 5 * 60 * 1000,
-  });
+  const principalQuery = usePrincipal();
 
   if (principalQuery.isLoading) return <p className="text-slate-500">불러오는 중...</p>;
 
