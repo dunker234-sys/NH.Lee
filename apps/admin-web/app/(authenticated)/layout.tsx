@@ -21,6 +21,8 @@ const NAV_ITEMS = [
   { href: '/schedule/shift-templates', label: '교대 패턴' },
   { href: '/schedule/reports', label: '리포트' },
   { href: '/migration', label: '개시 데이터 이관' },
+  { href: '/ops-monitoring', label: '운영 모니터링', roles: ['HQ_HR', 'ADMIN'] },
+  { href: '/employees/protected-status', label: '보호 상태 등록', roles: ['HQ_HR'] },
 ];
 
 /** 이 그룹 아래 모든 페이지가 공유하는 인증 앱 셸(사이드바+세션 가드).
@@ -63,7 +65,7 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
       <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white p-4">
         <p className="mb-6 text-sm font-semibold text-slate-500">근태관리 관리자</p>
         <nav className="flex-1 space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.filter((item) => !item.roles || (role && item.roles.includes(role))).map((item) => {
             const active = pathname === item.href || (item.href !== '/punch' && pathname.startsWith(item.href));
             return (
               <Link
