@@ -13,7 +13,7 @@ describe('SYSTEM 주체 — 더미 배치', () => {
 
   beforeAll(async () => {
     await resetDatabase();
-    await loadFixture(); // siteA에 4명, siteB에 1명 = 총 5명, 2개 사업장
+    await loadFixture(); // siteA에 5명(admin 포함), siteB에 1명 = 총 6명, 2개 사업장
     app = await createTestApp();
     prisma = app.get(PrismaService);
     service = app.get(SystemBatchService);
@@ -26,7 +26,7 @@ describe('SYSTEM 주체 — 더미 배치', () => {
   it('로그인 컨텍스트 없이 전 사업장 직원을 조회하고, 그 사실이 audit_log에 남는다', async () => {
     const result = await service.runDummyAllSitesBatch();
 
-    expect(result.employeeCount).toBe(5);
+    expect(result.employeeCount).toBe(6);
     expect(result.siteCount).toBe(2); // siteA + siteB 양쪽 다 조회됨 (스코프 우회 증명)
     expect(result.jobId).toBeTruthy();
 
@@ -42,7 +42,7 @@ describe('SYSTEM 주체 — 더미 배치', () => {
     expect(auditRow?.recordHash).toBeTruthy();
   });
 
-  it('일반 EMPLOYEE 스코프로는 같은 조회를 해도 5명 전체가 나오지 않는다(대조군)', async () => {
+  it('일반 EMPLOYEE 스코프로는 같은 조회를 해도 6명 전체가 나오지 않는다(대조군)', async () => {
     // SYSTEM의 ALL 스코프가 실제로 "우회"임을 보여주기 위한 대조 실험 —
     // EmployeesRepository를 SITES 스코프로 직접 호출하면 해당 사업장 인원만 나온다.
     const { EmployeesRepository } = await import('../src/modules/employees/employees.repository');

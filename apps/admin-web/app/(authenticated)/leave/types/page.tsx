@@ -7,8 +7,40 @@ import { usePrincipal } from '../../../../lib/usePrincipal';
 import { leaveTypeApi, type LeaveCategory, type LeaveDeductionUnit } from '../../../../lib/api/leaveApi';
 
 const ALLOWED_ROLES = new Set(['ADMIN', 'HQ_HR']);
-const CATEGORIES: LeaveCategory[] = ['ANNUAL', 'HALF_DAY', 'QUARTER_DAY', 'CONGRATULATION', 'PUBLIC', 'SICK', 'UNPAID', 'SUBSTITUTE', 'COMPENSATORY'];
+const CATEGORIES: LeaveCategory[] = [
+  'ANNUAL',
+  'HALF_DAY',
+  'QUARTER_DAY',
+  'CONGRATULATION',
+  'PUBLIC',
+  'SICK',
+  'UNPAID',
+  'SUBSTITUTE',
+  'COMPENSATORY',
+  'REGULAR',
+  'MATERNITY',
+];
 const DEDUCTION_UNITS: LeaveDeductionUnit[] = ['FULL_DAY', 'HALF_DAY', 'HOUR'];
+
+// 2026-09 수정사항: 분류/차감 단위를 화면에서 전부 한글로 표시한다.
+const CATEGORY_LABELS_KO: Record<LeaveCategory, string> = {
+  ANNUAL: '연차',
+  HALF_DAY: '반차',
+  QUARTER_DAY: '반반차',
+  CONGRATULATION: '경조휴가',
+  PUBLIC: '공가',
+  SICK: '병가',
+  UNPAID: '무급휴직',
+  SUBSTITUTE: '대체휴무',
+  COMPENSATORY: '보상휴가',
+  REGULAR: '정기휴가',
+  MATERNITY: '산전후휴가',
+};
+const DEDUCTION_UNIT_LABELS_KO: Record<LeaveDeductionUnit, string> = {
+  FULL_DAY: '1일',
+  HALF_DAY: '반일',
+  HOUR: '시간',
+};
 
 function ErrorMessage({ error }: { error: unknown }) {
   if (!(error instanceof ApiError)) return null;
@@ -67,7 +99,7 @@ function CreateForm() {
         <select className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" value={category} onChange={(e) => setCategory(e.target.value as LeaveCategory)}>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
-              {c}
+              {CATEGORY_LABELS_KO[c]}
             </option>
           ))}
         </select>
@@ -81,7 +113,7 @@ function CreateForm() {
         >
           {DEDUCTION_UNITS.map((u) => (
             <option key={u} value={u}>
-              {u}
+              {DEDUCTION_UNIT_LABELS_KO[u]}
             </option>
           ))}
         </select>
@@ -156,9 +188,9 @@ export default function LeaveTypesPage() {
               <tr key={t.id}>
                 <td className="px-3 py-2 text-sm text-slate-700">{t.code}</td>
                 <td className="px-3 py-2 text-sm text-slate-700">{t.name}</td>
-                <td className="px-3 py-2 text-sm text-slate-600">{t.category}</td>
+                <td className="px-3 py-2 text-sm text-slate-600">{CATEGORY_LABELS_KO[t.category]}</td>
                 <td className="px-3 py-2 text-sm text-slate-600">{t.paid ? '유급' : '무급'}</td>
-                <td className="px-3 py-2 text-sm text-slate-600">{t.deductionUnit}</td>
+                <td className="px-3 py-2 text-sm text-slate-600">{DEDUCTION_UNIT_LABELS_KO[t.deductionUnit]}</td>
                 <td className="px-3 py-2 text-sm text-slate-600">{t.evidenceRequired ? '필요' : '-'}</td>
                 <td className="px-3 py-2 text-right text-sm text-slate-600">
                   {t.applicationDeadlineDaysBeforeUse ?? '-'}

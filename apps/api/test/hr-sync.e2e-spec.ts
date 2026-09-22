@@ -56,9 +56,9 @@ function fillerRows(): string[] {
 /**
  * 인사시스템 추출 파일은 "변경분"이 아니라 매번 전 재직 인원의 스냅샷이다
  * (diff 엔진이 "피드에 없으면 퇴사"로 판정하므로 — hr-sync-diff.ts). 픽스처
- * 5명 + 필러 15명을 실제 DB 상태 그대로(변경 없음) 매 피드에 포함시켜,
- * 그들이 매번 DEPARTED로 오판정되지 않게 한다. 전체 재직 20명 기준
- * 1명 변경 = 5%(자동적용), 4명 변경 = 20%(보류) 시나리오를 구성한다.
+ * 6명 + 필러 15명을 실제 DB 상태 그대로(변경 없음) 매 피드에 포함시켜,
+ * 그들이 매번 DEPARTED로 오판정되지 않게 한다. 전체 재직 21명 기준
+ * 1명 변경 ≈ 4.8%(자동적용), 4명 변경 ≈ 19%(보류) 시나리오를 구성한다.
  */
 function baselineRows(): string[] {
   return [
@@ -66,6 +66,7 @@ function baselineRows(): string[] {
     `T-SM-B,테스트-T-SM-B,SITE-TEST-B,,,REGULAR,2024-01-01,,,,2020-01-01`,
     `T-HQHR,테스트-T-HQHR,SITE-TEST-A,,,REGULAR,2024-01-01,,,,2020-01-01`,
     `T-REGIONAL,테스트-T-REGIONAL,SITE-TEST-A,,,REGULAR,2024-01-01,,,,2020-01-01`,
+    `T-ADMIN,테스트-T-ADMIN,SITE-TEST-A,,,REGULAR,2024-01-01,,,,2020-01-01`,
     `T-EMP-A,테스트-T-EMP-A,SITE-TEST-A,,,REGULAR,2024-01-01,,,,2020-01-01`,
     ...fillerRows(),
   ];
@@ -153,8 +154,8 @@ describe('HR 연동 — 요구사항서 5장', () => {
   });
 
   it('15% 이상 변경 시나리오에서는 자동 적용이 차단되고 확인을 요구한다', async () => {
-    // 현재 재직 인원(픽스처 5명 + 필러 15명 + 앞선 자동적용 1명 = 21명) 대비
-    // 신규 4명은 4/21 ≈ 19% > 10% 임계값이다.
+    // 현재 재직 인원(픽스처 6명 + 필러 15명 + 앞선 자동적용 1명 = 22명) 대비
+    // 신규 4명은 4/22 ≈ 18% > 10% 임계값이다.
     await writeFeed(feedDir, 'bulk-change.csv', [
       ...baselineRows(),
       'AUTO001,자동적용직원,SITE-TEST-A,,,REGULAR,2026-01-02,,,,2026-01-01',

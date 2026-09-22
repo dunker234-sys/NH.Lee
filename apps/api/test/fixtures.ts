@@ -38,6 +38,7 @@ export interface Fixture {
     siteManagerB: FixtureEmployee;
     hqHr: FixtureEmployee;
     regional: FixtureEmployee;
+    admin: FixtureEmployee;
     plainEmployeeA: FixtureEmployee;
   };
   password: string;
@@ -90,12 +91,13 @@ export async function loadFixture(): Promise<Fixture> {
   const siteManagerB = await makeEmployee('T-SM-B', 'SITE_MANAGER', siteB.id);
   const hqHr = await makeEmployee('T-HQHR', 'HQ_HR', siteA.id);
   const regional = await makeEmployee('T-REGIONAL', 'REGIONAL', siteA.id);
+  const admin = await makeEmployee('T-ADMIN', 'ADMIN', siteA.id);
   const plainEmployeeA = await makeEmployee('T-EMP-A', 'EMPLOYEE', siteA.id);
 
   return {
     siteA: { id: siteA.id, lat: SITE_A_LAT, lng: SITE_A_LNG },
     siteB: { id: siteB.id, lat: SITE_B_LAT, lng: SITE_B_LNG },
-    employees: { siteManagerA, siteManagerB, hqHr, regional, plainEmployeeA },
+    employees: { siteManagerA, siteManagerB, hqHr, regional, admin, plainEmployeeA },
     password,
   };
 }

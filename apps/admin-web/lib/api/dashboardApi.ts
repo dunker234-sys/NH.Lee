@@ -1,7 +1,8 @@
 import { apiFetch } from '../apiClient';
 
 export interface HqDashboardSummary {
-  siteCount: number;
+  totalHeadcount: number;
+  dayOffCount: number;
   todayScheduledCount: number;
   todayCheckedInCount: number;
   todayAttendanceRatePercent: number;
@@ -15,6 +16,7 @@ export interface HqDashboardSummary {
 export interface SiteDashboardSummary {
   siteId: string;
   todayWorkingCount: number;
+  dayOffCount: number;
   todayNoShowCount: number;
   pendingApprovalCount: number;
   atRiskEmployeeCount: number;

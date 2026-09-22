@@ -113,10 +113,10 @@ describe('연차 자동 계산 — §60⑥ 출근간주 기간(육아휴직)', (
     }
 
     // 육아휴직: 2025-04-01 ~ 2025-06-30(약 91일).
-    const { accessToken: hqHrToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-childcare-hr');
+    const { accessToken: adminToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-childcare-admin');
     const statusRes = await request(app.getHttpServer())
       .post(`/employees/${employee.id}/protected-status`)
-      .set(auth(hqHrToken))
+      .set(auth(adminToken))
       .send({ statusType: 'CHILDCARE_LEAVE', effectiveStartDate: '2025-04-01', effectiveEndDate: '2025-06-30' });
     expect(statusRes.status).toBe(201);
 
@@ -129,7 +129,7 @@ describe('연차 자동 계산 — §60⑥ 출근간주 기간(육아휴직)', (
     const { accessToken } = await login(app, fixture.employees.siteManagerA.employeeNo, fixture.password, 'dev-childcare-mgr');
     const typeRes = await request(app.getHttpServer())
       .post('/admin/leave/types')
-      .set(auth(hqHrToken))
+      .set(auth(adminToken))
       .send({ code: 'ANNUAL', name: '연차', category: 'ANNUAL', paid: true, deductionUnit: 'FULL_DAY' });
     expect(typeRes.status).toBe(201);
 

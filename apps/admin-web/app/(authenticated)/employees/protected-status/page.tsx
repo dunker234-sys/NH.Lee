@@ -167,9 +167,9 @@ function RegisterForm() {
   );
 }
 
-/** STEP12 §A3. 백엔드 @Roles('HQ_HR')와 동일 기준으로 화면도 HQ_HR만
- * 허용한다 — 민감정보라 SITE_MANAGER/REGIONAL/ADMIN도 제외한다(계획서
- * SEC-3 근거와 동일: "다른 관리자 역할은 호출할 수 없다").
+/** STEP12 §A3, 2026-09 수정사항으로 "프로그램 관리자"(ADMIN) 전용으로 재분류.
+ * 백엔드 @Roles('ADMIN')와 동일 기준으로 화면도 ADMIN만 허용한다 — 민감정보라
+ * SITE_MANAGER/REGIONAL/HQ_HR도 제외한다.
  * 조회(목록) API가 아직 없어 이 화면은 등록 전용이다. */
 export default function EmployeeProtectedStatusPage() {
   const principalQuery = usePrincipal();
@@ -177,8 +177,8 @@ export default function EmployeeProtectedStatusPage() {
   if (principalQuery.isLoading) return <p className="text-slate-500">불러오는 중...</p>;
 
   const role = principalQuery.data?.principal.role;
-  if (role !== 'HQ_HR') {
-    return <p className="text-slate-600">이 화면은 HQ_HR 권한만 볼 수 있습니다.</p>;
+  if (role !== 'ADMIN') {
+    return <p className="text-slate-600">이 화면은 ADMIN 권한만 볼 수 있습니다.</p>;
   }
 
   return (

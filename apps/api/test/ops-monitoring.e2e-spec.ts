@@ -27,14 +27,20 @@ describe('운영 모니터링 (STEP12)', () => {
     await app.close();
   });
 
-  it('HQ_HR 외 역할(SITE_MANAGER)은 403으로 거부된다', async () => {
+  it('ADMIN 외 역할(SITE_MANAGER)은 403으로 거부된다', async () => {
     const { accessToken } = await login(app, fixture.employees.siteManagerA.employeeNo, fixture.password, 'dev-ops-block');
     const res = await request(app.getHttpServer()).get('/admin/ops/monitoring').set(auth(accessToken));
     expect(res.status).toBe(403);
   });
 
-  it('HQ_HR은 6개 지표를 조회할 수 있다', async () => {
-    const { accessToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-ops-hqhr');
+  it('ADMIN 외 역할(HQ_HR)도 403으로 거부된다(2026-09 수정사항 — 프로그램 관리자 전용 재분류)', async () => {
+    const { accessToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-ops-block-hqhr');
+    const res = await request(app.getHttpServer()).get('/admin/ops/monitoring').set(auth(accessToken));
+    expect(res.status).toBe(403);
+  });
+
+  it('ADMIN은 6개 지표를 조회할 수 있다', async () => {
+    const { accessToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-ops-admin');
     const res = await request(app.getHttpServer()).get('/admin/ops/monitoring').set(auth(accessToken));
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('punchFailureRatePercent');

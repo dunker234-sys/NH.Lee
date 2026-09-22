@@ -2,7 +2,19 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LeaveCategory, LeaveDeductionUnit } from '@prisma/client';
 import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
-const CATEGORIES = ['ANNUAL', 'HALF_DAY', 'QUARTER_DAY', 'CONGRATULATION', 'PUBLIC', 'SICK', 'UNPAID', 'SUBSTITUTE', 'COMPENSATORY'];
+const CATEGORIES = [
+  'ANNUAL',
+  'HALF_DAY',
+  'QUARTER_DAY',
+  'CONGRATULATION',
+  'PUBLIC',
+  'SICK',
+  'UNPAID',
+  'SUBSTITUTE',
+  'COMPENSATORY',
+  'REGULAR',
+  'MATERNITY',
+];
 const DEDUCTION_UNITS = ['FULL_DAY', 'HALF_DAY', 'HOUR'];
 
 export class CreateLeaveTypeDto {

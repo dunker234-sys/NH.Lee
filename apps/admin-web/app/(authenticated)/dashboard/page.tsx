@@ -88,7 +88,8 @@ function HqDashboardView() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatTile label="사업장" value={d.siteCount} hint="관할 사업장 수" />
+        <StatTile label="관할 인원" value={d.totalHeadcount} hint="관할 사업장 인원수(합계)" />
+        <StatTile label="휴무자" value={d.dayOffCount} hint="오늘 승인된 휴가로 휴무" />
         <StatTile label="미등록" value={d.todayNoShowCount} tone={d.todayNoShowCount > 0 ? 'warning' : 'neutral'} hint="오늘 미출근 감지" />
         <StatTile
           label="52시간 위험 인원"
@@ -96,17 +97,18 @@ function HqDashboardView() {
           tone={d.atRiskEmployeeCount > 0 ? 'danger' : 'neutral'}
           hint="이번 주 위험·초과 단계"
         />
-        <StatTile label="승인 대기" value={d.pendingApprovalCount} tone={d.pendingApprovalCount > 0 ? 'warning' : 'neutral'} />
+        <StatTile label="파견 승인대기" value={d.pendingApprovalCount} tone={d.pendingApprovalCount > 0 ? 'warning' : 'neutral'} />
         <StatTile
-          label="이상 타각 검토 큐"
+          label="수정사항"
           value={d.fraudReviewQueueCount}
           tone={d.fraudReviewQueueCount > 0 ? 'warning' : 'neutral'}
-          hint="오늘 발생한 신호"
+          hint="오늘 발생한 이상 타각 신호"
         />
         <StatTile
-          label="미승인 실적 미판정"
+          label="결재대기"
           value={d.unapprovedUnjudgedCount}
           tone={d.unapprovedUnjudgedCount > 0 ? 'warning' : 'neutral'}
+          hint="관리자 확인이 필요한 미승인 실적"
         />
       </div>
     </div>
@@ -129,8 +131,9 @@ function SiteDashboardView({ siteId, siteName }: { siteId: string; siteName: str
       <h1 className="text-xl font-bold">{siteName} 대시보드</h1>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatTile label="오늘 근무 인원" value={d.todayWorkingCount} />
+        <StatTile label="휴무자" value={d.dayOffCount} hint="오늘 승인된 휴가로 휴무" />
         <StatTile label="미출근자" value={d.todayNoShowCount} tone={d.todayNoShowCount > 0 ? 'warning' : 'neutral'} />
-        <StatTile label="승인 대기" value={d.pendingApprovalCount} tone={d.pendingApprovalCount > 0 ? 'warning' : 'neutral'} />
+        <StatTile label="파견 승인대기" value={d.pendingApprovalCount} tone={d.pendingApprovalCount > 0 ? 'warning' : 'neutral'} />
         <StatTile
           label="초과근로 위험자"
           value={d.atRiskEmployeeCount}

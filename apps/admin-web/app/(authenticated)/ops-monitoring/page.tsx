@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { usePrincipal } from '../../../lib/usePrincipal';
 import { opsMonitoringApi, type QueueHealth } from '../../../lib/api/opsMonitoringApi';
 
-const ALLOWED_ROLES = new Set(['HQ_HR', 'ADMIN']);
+const ALLOWED_ROLES = new Set(['ADMIN']);
 const RETENTION_QUEUE_NAME = 'punch-location-retention';
 
 function MetricTile({

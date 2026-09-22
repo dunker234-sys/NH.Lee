@@ -38,6 +38,12 @@ export function GridView({ employees, days, rows, templates, armedTemplateId, pe
     return t ? t.name.slice(0, 4) : '?';
   }
 
+  function templateTimeLabel(id: string | null): string | undefined {
+    if (!id) return undefined;
+    const t = templateById.get(id);
+    return t ? `${t.startTime}~${t.endTime}` : undefined;
+  }
+
   function applyRange(employeeId: string, fromIdx: number, toIdx: number) {
     if (!armedRef.current) return;
     const [lo, hi] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
@@ -93,12 +99,15 @@ export function GridView({ employees, days, rows, templates, armedTemplateId, pe
                 const key = cellKey(emp.id, d);
                 const pendingCell = pending.get(key);
                 const existing = rowsByKey.get(key);
-                const label = pendingCell ? templateLabel(pendingCell.shiftTemplateId) : templateLabel(existing?.shiftTemplateId ?? null);
+                const activeTemplateId = pendingCell ? pendingCell.shiftTemplateId : (existing?.shiftTemplateId ?? null);
+                const label = templateLabel(activeTemplateId);
+                const timeLabel = templateTimeLabel(activeTemplateId);
                 const selected = drag?.employeeId === emp.id && idx >= Math.min(drag.startIdx, drag.curIdx) && idx <= Math.max(drag.startIdx, drag.curIdx);
                 return (
                   <td key={d}>
                     <GridCell
                       label={label}
+                      timeLabel={timeLabel}
                       confirmed={existing?.status === 'CONFIRMED'}
                       pending={Boolean(pendingCell)}
                       selected={Boolean(selected)}

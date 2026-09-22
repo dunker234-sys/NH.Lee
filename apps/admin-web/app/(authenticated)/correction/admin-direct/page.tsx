@@ -9,7 +9,7 @@ import { sitesApi } from '../../../../lib/api/sitesApi';
 import { employeesApi } from '../../../../lib/api/employeesApi';
 import { adminCorrectionApi, correctionReportApi, type CorrectionReasonCode } from '../../../../lib/api/correctionApi';
 
-const ALLOWED_ROLES = new Set(['HQ_HR']);
+const ALLOWED_ROLES = new Set(['ADMIN']);
 const REASON_LABEL: Record<CorrectionReasonCode, string> = {
   PUNCH_MISSING: '타각 누락',
   DEVICE_ERROR: '기기 오류',

@@ -22,7 +22,7 @@ export default function ScheduleReportsPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl font-bold">계획 대비 실적</h1>
+        <h1 className="text-xl font-bold">근무스케쥴(실적)</h1>
         <select value={activeSiteId ?? ''} onChange={(e) => setSiteId(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-sm">
           {sitesQuery.data?.items.map((s) => (
             <option key={s.id} value={s.id}>

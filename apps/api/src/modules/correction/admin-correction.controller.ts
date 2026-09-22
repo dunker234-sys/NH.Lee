@@ -7,9 +7,9 @@ import { OrgScope } from '../../common/scope/org-scope.types';
 import { AdminCorrectionService } from './admin-correction.service';
 import { AdminCorrectionDto } from './dto/admin-correction.dto';
 
-/** 직권 정정(요구사항 4.7-4) — HQ_HR만. */
+/** 직권 정정(요구사항 4.7-4) — 2026-09 수정사항으로 "프로그램 관리자"(ADMIN) 전용. */
 @ApiTags('correction')
-@Roles('HQ_HR')
+@Roles('ADMIN')
 @Controller('admin/correction/admin-direct')
 export class AdminCorrectionController {
   constructor(private readonly service: AdminCorrectionService) {}

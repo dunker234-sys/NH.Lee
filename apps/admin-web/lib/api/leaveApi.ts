@@ -11,7 +11,9 @@ export type LeaveCategory =
   | 'SICK'
   | 'UNPAID'
   | 'SUBSTITUTE'
-  | 'COMPENSATORY';
+  | 'COMPENSATORY'
+  | 'REGULAR'
+  | 'MATERNITY';
 export type LeaveDeductionUnit = 'FULL_DAY' | 'HALF_DAY' | 'HOUR';
 
 export interface LeaveRequest {

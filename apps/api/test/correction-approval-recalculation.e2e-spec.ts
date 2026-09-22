@@ -199,14 +199,14 @@ describe('정정 승인 → 재계산 (STEP8)', () => {
     expect(approveRes.body.status).toBe('APPROVED_L2');
   }, 20000);
 
-  it('직권 정정(HQ_HR)은 즉시 APPROVED_L2로 생성되고 근로자에게 통지된다', async () => {
+  it('직권 정정(ADMIN)은 즉시 APPROVED_L2로 생성되고 근로자에게 통지된다', async () => {
     const employeeId = fixture.employees.plainEmployeeA.id;
     const workDate = '2026-09-04';
 
-    const { accessToken: hqToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-correction-e2e-admin');
+    const { accessToken: adminToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-correction-e2e-admin');
     const res = await request(app.getHttpServer())
       .post('/admin/correction/admin-direct')
-      .set(auth(hqToken))
+      .set(auth(adminToken))
       .send({
         employeeId,
         targetWorkDate: workDate,

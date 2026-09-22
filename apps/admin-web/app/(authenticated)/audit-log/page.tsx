@@ -7,8 +7,8 @@ import { usePrincipal } from '../../../lib/usePrincipal';
 import { sitesApi } from '../../../lib/api/sitesApi';
 import { auditLogApi } from '../../../lib/api/auditApi';
 
-const ALLOWED_ROLES = new Set(['SITE_MANAGER', 'REGIONAL', 'HQ_HR', 'ADMIN']);
-const INTEGRITY_ROLES = new Set(['HQ_HR', 'ADMIN']);
+const ALLOWED_ROLES = new Set(['ADMIN']);
+const INTEGRITY_ROLES = new Set(['ADMIN']);
 
 function ErrorMessage({ error }: { error: unknown }) {
   if (!(error instanceof ApiError)) return null;

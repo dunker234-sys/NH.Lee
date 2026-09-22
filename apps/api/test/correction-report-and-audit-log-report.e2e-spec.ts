@@ -75,10 +75,10 @@ describe('정정/감사로그 조회 리포트 (STEP8)', () => {
   });
 
   it('requestSource=ADMIN_DIRECT 필터가 직권 정정 전량 추적 리포트 역할을 한다', async () => {
-    const { accessToken: hqToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-report-admin-direct');
+    const { accessToken: adminToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-report-admin-direct');
     await request(app.getHttpServer())
       .post('/admin/correction/admin-direct')
-      .set(auth(hqToken))
+      .set(auth(adminToken))
       .send({
         employeeId: fixture.employees.plainEmployeeA.id,
         targetWorkDate: '2026-09-06',
@@ -87,6 +87,7 @@ describe('정정/감사로그 조회 리포트 (STEP8)', () => {
         afterValue: { note: 'admin' },
       });
 
+    const { accessToken: hqToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-report-admin-direct-2');
     const res = await request(app.getHttpServer())
       .get('/admin/correction/report?requestSource=ADMIN_DIRECT')
       .set(auth(hqToken));
@@ -95,7 +96,7 @@ describe('정정/감사로그 조회 리포트 (STEP8)', () => {
     expect(res.body.every((r: { requestSource: string }) => r.requestSource === 'ADMIN_DIRECT')).toBe(true);
   });
 
-  it('감사로그 조회는 사업장 관리자에게 siteId를 강제하고, 자기 사업장 근로자만 보여준다', async () => {
+  it('감사로그 조회는 2026-09 수정사항으로 ADMIN 전용이며, ADMIN은 siteId 없이도 전체를 볼 수 있다', async () => {
     const { accessToken: employeeToken } = await login(app, fixture.employees.plainEmployeeA.employeeNo, fixture.password, 'dev-audit-report-emp');
     await request(app.getHttpServer())
       .post('/me/correction-requests')
@@ -111,29 +112,25 @@ describe('정정/감사로그 조회 리포트 (STEP8)', () => {
     const to = '2026-12-31T23:59:59.000Z';
 
     const { accessToken: managerAToken } = await login(app, fixture.employees.siteManagerA.employeeNo, fixture.password, 'dev-audit-report-mgr');
-    const missingSiteId = await request(app.getHttpServer())
-      .get(`/admin/audit/log?from=${from}&to=${to}`)
-      .set(auth(managerAToken));
-    expect(missingSiteId.status).toBe(400);
-    expect(missingSiteId.body.code).toBe('AUDIT_LOG_SITE_ID_REQUIRED');
-
-    const withSiteId = await request(app.getHttpServer())
+    const roleDenied = await request(app.getHttpServer())
       .get(`/admin/audit/log?from=${from}&to=${to}&siteId=${fixture.siteA.id}`)
       .set(auth(managerAToken));
-    expect(withSiteId.status).toBe(200);
-    expect(withSiteId.body.some((r: { eventType: string; subjectEmployeeId: string }) => r.eventType === 'CORRECTION_REQUESTED' && r.subjectEmployeeId === fixture.employees.plainEmployeeA.id)).toBe(true);
+    expect(roleDenied.status).toBe(403);
+    expect(roleDenied.body.code).toBe('ROLE_DENIED');
 
-    const foreignSite = await request(app.getHttpServer())
-      .get(`/admin/audit/log?from=${from}&to=${to}&siteId=${fixture.siteB.id}`)
-      .set(auth(managerAToken));
-    expect(foreignSite.status).toBe(403);
+    const { accessToken: adminToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-audit-report-admin');
+    const withoutSiteId = await request(app.getHttpServer())
+      .get(`/admin/audit/log?from=${from}&to=${to}`)
+      .set(auth(adminToken));
+    expect(withoutSiteId.status).toBe(200);
+    expect(withoutSiteId.body.some((r: { eventType: string; subjectEmployeeId: string }) => r.eventType === 'CORRECTION_REQUESTED' && r.subjectEmployeeId === fixture.employees.plainEmployeeA.id)).toBe(true);
   });
 
   it('감사로그 엑셀 내보내기가 xlsx 바이너리를 반환한다', async () => {
-    const { accessToken: hqToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-audit-export');
+    const { accessToken: adminToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-audit-export');
     const res = await request(app.getHttpServer())
       .get('/admin/audit/log/export?from=2026-01-01T00:00:00.000Z&to=2026-12-31T23:59:59.000Z')
-      .set(auth(hqToken))
+      .set(auth(adminToken))
       .buffer(true)
       .parse((response, callback) => {
         const chunks: Buffer[] = [];

@@ -154,7 +154,7 @@ export default function SchedulePage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-bold">편성</h1>
+        <h1 className="text-xl font-bold">근무스케쥴(계획)</h1>
         <select
           value={activeSiteId ?? ''}
           onChange={(e) => setSiteId(e.target.value)}

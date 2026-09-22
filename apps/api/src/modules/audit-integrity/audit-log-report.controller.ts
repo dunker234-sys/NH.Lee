@@ -6,9 +6,10 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { OrgScope } from '../../common/scope/org-scope.types';
 import { AuditLogReportService } from './audit-log-report.service';
 
-/** 요구사항5 "조회 화면: 기간·사업장·근로자·행위자 필터, 엑셀 내보내기". */
+/** 요구사항5 "조회 화면: 기간·사업장·근로자·행위자 필터, 엑셀 내보내기".
+ * 2026-09 수정사항으로 "프로그램 관리자"(ADMIN) 전용으로 재분류. */
 @ApiTags('audit')
-@Roles('SITE_MANAGER', 'REGIONAL', 'HQ_HR', 'ADMIN')
+@Roles('ADMIN')
 @Controller('admin/audit/log')
 export class AuditLogReportController {
   constructor(private readonly service: AuditLogReportService) {}

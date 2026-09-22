@@ -903,6 +903,8 @@ enum LeaveCategory {
   UNPAID // 무급휴직
   SUBSTITUTE // 대체휴무
   COMPENSATORY // 보상휴가
+  REGULAR // 정기휴가 (2026-09 수정사항)
+  MATERNITY // 산전후휴가 (2026-09 수정사항)
 }
 
 enum LeaveDeductionUnit {

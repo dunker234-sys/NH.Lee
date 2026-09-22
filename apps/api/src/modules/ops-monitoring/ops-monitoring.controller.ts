@@ -3,8 +3,9 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { OpsMonitoringService } from './ops-monitoring.service';
 
+/** 2026-09 수정사항으로 "프로그램 관리자"(ADMIN) 전용으로 재분류. */
 @ApiTags('ops-monitoring')
-@Roles('HQ_HR', 'ADMIN')
+@Roles('ADMIN')
 @Controller('admin/ops/monitoring')
 export class OpsMonitoringController {
   constructor(private readonly service: OpsMonitoringService) {}

@@ -12,9 +12,9 @@ function auth(token: string) {
 
 /**
  * STEP12: 개인정보 컬럼 암호화(EmployeeProtectedStatus.statusType) + 권한
- * 우회 재점검. HQ_HR 외 역할은 여전히 차단되고(기존 STEP6 RBAC 회귀),
- * DB에 실제로 저장되는 값은 평문이 아니라 AES-256-GCM 암호문임을 직접
- * 확인한다.
+ * 우회 재점검. 2026-09 수정사항으로 "프로그램 관리자"(ADMIN) 전용으로
+ * 재분류됐다 — HQ_HR을 포함한 ADMIN 외 역할은 모두 차단되고, DB에
+ * 실제로 저장되는 값은 평문이 아니라 AES-256-GCM 암호문임을 직접 확인한다.
  */
 describe('보호상태 신고 — 권한 및 암호화 저장 (STEP12)', () => {
   let app: INestApplication;
@@ -32,7 +32,7 @@ describe('보호상태 신고 — 권한 및 암호화 저장 (STEP12)', () => {
     await app.close();
   });
 
-  it('HQ_HR 외 역할(SITE_MANAGER)은 403으로 거부된다(기존 RBAC 회귀 확인)', async () => {
+  it('ADMIN 외 역할(SITE_MANAGER)은 403으로 거부된다(기존 RBAC 회귀 확인)', async () => {
     const { accessToken } = await login(app, fixture.employees.siteManagerA.employeeNo, fixture.password, 'dev-protected-status-block');
     const res = await request(app.getHttpServer())
       .post(`/employees/${fixture.employees.plainEmployeeA.id}/protected-status`)
@@ -41,8 +41,17 @@ describe('보호상태 신고 — 권한 및 암호화 저장 (STEP12)', () => {
     expect(res.status).toBe(403);
   });
 
-  it('HQ_HR은 저장할 수 있고, DB에는 평문이 아닌 암호문으로 저장된다', async () => {
-    const { accessToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-protected-status-hqhr');
+  it('ADMIN 외 역할(HQ_HR)도 403으로 거부된다(2026-09 수정사항 — 프로그램 관리자 전용 재분류)', async () => {
+    const { accessToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'dev-protected-status-hqhr-block');
+    const res = await request(app.getHttpServer())
+      .post(`/employees/${fixture.employees.plainEmployeeA.id}/protected-status`)
+      .set(auth(accessToken))
+      .send({ statusType: 'PREGNANCY', effectiveStartDate: '2026-01-01' });
+    expect(res.status).toBe(403);
+  });
+
+  it('ADMIN은 저장할 수 있고, DB에는 평문이 아닌 암호문으로 저장된다', async () => {
+    const { accessToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-protected-status-admin');
     const res = await request(app.getHttpServer())
       .post(`/employees/${fixture.employees.plainEmployeeA.id}/protected-status`)
       .set(auth(accessToken))

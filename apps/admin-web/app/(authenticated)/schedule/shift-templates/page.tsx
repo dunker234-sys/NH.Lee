@@ -79,7 +79,7 @@ export default function ShiftTemplatesPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl font-bold">교대 패턴</h1>
+        <h1 className="text-xl font-bold">근무스케쥴(등록)</h1>
         <select value={activeSiteId ?? ''} onChange={(e) => setSiteId(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-sm">
           {sitesQuery.data?.items.map((s) => (
             <option key={s.id} value={s.id}>
@@ -88,6 +88,9 @@ export default function ShiftTemplatesPage() {
           ))}
         </select>
       </div>
+      <p className="text-sm text-slate-500">
+        여기서 등록한 근무스케쥴은 &apos;근무스케쥴(계획)&apos; 화면의 채우기 값으로 사용됩니다.
+      </p>
 
       {error && <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
 

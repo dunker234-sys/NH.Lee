@@ -31,12 +31,12 @@ export class EmployeesController {
     return this.employeesService.setPin(scope, employeeId, dto.pin);
   }
 
-  @Roles('HQ_HR')
+  @Roles('ADMIN')
   @Post(':id/protected-status')
   @ApiOperation({
-    summary: 'STEP6: 임신 등 보호 상태 신고(HQ_HR 전용)',
+    summary: 'STEP6: 임신 등 보호 상태 신고(2026-09 수정사항 — "프로그램 관리자" ADMIN 전용)',
     description:
-      '민감정보라 다른 관리자 역할(SITE_MANAGER/REGIONAL/ADMIN)은 호출할 수 없다. ' +
+      '민감정보라 다른 관리자 역할(SITE_MANAGER/REGIONAL/HQ_HR)은 호출할 수 없다. ' +
       'Employee 본체와 분리된 EmployeeProtectedStatus에 유효기간 있는 레코드로 저장된다.',
   })
   setProtectedStatus(

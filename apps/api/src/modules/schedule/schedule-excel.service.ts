@@ -56,7 +56,7 @@ export class ScheduleExcelService {
     assertSiteInScope(scope, siteId);
 
     const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('편성');
+    const sheet = workbook.addWorksheet('근무스케쥴');
     sheet.addRow([...HEADERS]);
 
     const templates = await this.prisma.shiftTemplate.findMany({ where: { siteId } });

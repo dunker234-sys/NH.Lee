@@ -105,7 +105,7 @@ describe('ComplianceReports & Dashboard — 요구사항서 4.4④⑤', () => {
     expect(res.headers['content-type']).toContain('spreadsheetml');
   });
 
-  it('HQ 대시보드 — 사업장 수·위험 인원 등을 2초 이내 반환한다', async () => {
+  it('HQ 대시보드 — 관할 인원·위험 인원 등을 2초 이내 반환한다', async () => {
     const { accessToken } = await login(app, fixture.employees.hqHr.employeeNo, fixture.password, 'compliance-test-4');
 
     const start = performance.now();
@@ -115,7 +115,8 @@ describe('ComplianceReports & Dashboard — 요구사항서 4.4④⑤', () => {
     const elapsedMs = performance.now() - start;
 
     expect(res.status).toBe(200);
-    expect(res.body.siteCount).toBeGreaterThanOrEqual(2);
+    expect(res.body.totalHeadcount).toBeGreaterThanOrEqual(0);
+    expect(res.body.dayOffCount).toBeGreaterThanOrEqual(0);
     expect(elapsedMs).toBeLessThan(2000);
   });
 
