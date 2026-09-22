@@ -44,6 +44,6 @@ import { PayrollColumnMappingController } from './payroll-export/payroll-column-
       inject: [ExcelPayrollExporter, CsvPayrollExporter],
     },
   ],
-  exports: [PayrollCloseGuardService, PayrollStatementComputationService],
+  exports: [PayrollCloseGuardService, PayrollStatementComputationService, EmployeeWageRateService],
 })
 export class PayrollCloseModule {}

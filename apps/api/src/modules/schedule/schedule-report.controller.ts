@@ -17,4 +17,11 @@ export class ScheduleReportController {
   scheduleVsActual(@CurrentOrgScope() scope: OrgScope, @Query('siteId') siteId: string, @Query('yearMonth') yearMonth: string) {
     return this.service.scheduleVsActual(scope, siteId, yearMonth);
   }
+
+  @Get('actual')
+  @ApiQuery({ name: 'siteId', required: true })
+  @ApiQuery({ name: 'yearMonth', required: true, description: 'YYYY-MM' })
+  actualReport(@CurrentOrgScope() scope: OrgScope, @Query('siteId') siteId: string, @Query('yearMonth') yearMonth: string) {
+    return this.service.actualReport(scope, siteId, yearMonth);
+  }
 }

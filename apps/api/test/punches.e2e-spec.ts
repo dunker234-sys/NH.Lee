@@ -2,7 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { PrismaService } from '../src/common/prisma/prisma.service';
 import { QrSecretProvisioningService } from '../src/modules/punches/qr-secret-provisioning.service';
-import { generateTotp } from '../src/common/crypto/totp.util';
+import { generateDailyCode, generateTotp } from '../src/common/crypto/totp.util';
 import { createTestApp } from './setup/app';
 import { resetDatabase } from './setup/db';
 import { login } from './setup/auth-helper';
@@ -326,6 +326,67 @@ describe('POST /punches — 타각 등록', () => {
 
       expect(res.body.integrityFlags).not.toContain('QR_VERIFICATION_INCONCLUSIVE');
       expect(res.body.verificationLevel).toBe('NORMAL');
+    });
+
+    // 수정사항: PC 타각 일단위 QR 출력 — 인쇄용 QR은 Wi-Fi/Cell 대역신호 대신
+    // 지오펜스 통과 여부로 검증된다.
+    it('일단위 코드 + 지오펜스 통과 시 정상 처리된다(인쇄용 QR)', async () => {
+      const secret = await qrSecretProvisioning.provision(fixture.siteA.id);
+      await adminPrisma.policyConfig.create({
+        data: {
+          key: 'qr_verification_policy',
+          value: 'QR_WITH_AUX_CHECK' as never,
+          siteId: fixture.siteA.id,
+          effectiveStartDate: new Date('2026-01-01'),
+        },
+      });
+
+      // dev-dedup: plainEmployeeA가 파일 최상단 멱등성 테스트에서 이미 신뢰를
+      // 획득한 기기를 재사용한다(새 deviceId면 DEVICE_NOT_TRUSTED가 섞인다).
+      const { accessToken } = await login(app, fixture.employees.plainEmployeeA.employeeNo, fixture.password, 'dev-dedup');
+      const dailyCode = generateDailyCode(secret, '2026-04-09');
+
+      const res = await request(app.getHttpServer())
+        .post('/punches')
+        .set(authHeader(accessToken))
+        .send({
+          punchType: 'IN',
+          recordedAt: '2026-04-09T09:00:00+09:00',
+          siteId: fixture.siteA.id,
+          registrationMethod: 'QR',
+          qrOrNfcToken: dailyCode,
+          deviceId: 'dev-dedup',
+          clientEventId: 'client-qr-daily-1',
+          location: { lat: fixture.siteA.lat, lng: fixture.siteA.lng, accuracyM: 10 },
+        });
+
+      expect([200, 201]).toContain(res.status);
+      expect(res.body.integrityFlags).not.toContain('QR_VERIFICATION_INCONCLUSIVE');
+      expect(res.body.verificationLevel).toBe('NORMAL');
+    });
+
+    it('일단위 코드가 일치해도 지오펜스 밖이면 LOW로 처리된다', async () => {
+      const secret = await qrSecretProvisioning.provision(fixture.siteA.id);
+      const { accessToken } = await login(app, fixture.employees.plainEmployeeA.employeeNo, fixture.password, 'dev-dedup');
+      const dailyCode = generateDailyCode(secret, '2026-04-10');
+
+      const res = await request(app.getHttpServer())
+        .post('/punches')
+        .set(authHeader(accessToken))
+        .send({
+          punchType: 'IN',
+          recordedAt: '2026-04-10T09:00:00+09:00',
+          siteId: fixture.siteA.id,
+          registrationMethod: 'QR',
+          qrOrNfcToken: dailyCode,
+          deviceId: 'dev-dedup',
+          clientEventId: 'client-qr-daily-2',
+          location: { lat: fixture.siteA.lat + 1, lng: fixture.siteA.lng, accuracyM: 10 },
+        });
+
+      expect([200, 201]).toContain(res.status);
+      expect(res.body.verificationLevel).toBe('LOW');
+      expect(res.body.integrityFlags).toContain('QR_VERIFICATION_INCONCLUSIVE');
     });
   });
 

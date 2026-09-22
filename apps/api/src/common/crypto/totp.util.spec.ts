@@ -1,4 +1,4 @@
-import { generateTotp, generateTotpSecret, verifyTotp } from './totp.util';
+import { generateDailyCode, generateTotp, generateTotpSecret, verifyDailyCode, verifyTotp } from './totp.util';
 
 describe('TOTP (RFC 6238 수동 구현)', () => {
   const secret = generateTotpSecret();
@@ -46,5 +46,40 @@ describe('TOTP (RFC 6238 수동 구현)', () => {
     const otherSecret = generateTotpSecret();
     const code = generateTotp(otherSecret, period, base);
     expect(verifyTotp(secret, period, code, base)).toBe(false);
+  });
+});
+
+/** 일단위 QR 출력(수정사항) — 시간 스텝이 아니라 근로일 문자열에 의존하는 정적 코드. */
+describe('일단위 코드(근로일 기준 정적 코드)', () => {
+  const secret = generateTotpSecret();
+
+  it('항상 6자리 숫자 문자열을 생성한다', () => {
+    expect(generateDailyCode(secret, '2026-09-22')).toMatch(/^\d{6}$/);
+  });
+
+  it('같은 근로일이면 하루 중 언제 계산해도 같은 코드다(TOTP와 달리 시간에 의존하지 않는다)', () => {
+    expect(generateDailyCode(secret, '2026-09-22')).toBe(generateDailyCode(secret, '2026-09-22'));
+  });
+
+  it('근로일이 하루만 달라도 코드가 달라진다', () => {
+    const today = generateDailyCode(secret, '2026-09-22');
+    const tomorrow = generateDailyCode(secret, '2026-09-23');
+    expect(today).not.toBe(tomorrow);
+  });
+
+  it('같은 근로일의 코드는 검증을 통과한다', () => {
+    const code = generateDailyCode(secret, '2026-09-22');
+    expect(verifyDailyCode(secret, code, '2026-09-22')).toBe(true);
+  });
+
+  it('다른 근로일의 코드는 거부한다', () => {
+    const code = generateDailyCode(secret, '2026-09-22');
+    expect(verifyDailyCode(secret, code, '2026-09-23')).toBe(false);
+  });
+
+  it('다른 시크릿으로 생성한 코드는 거부한다', () => {
+    const otherSecret = generateTotpSecret();
+    const code = generateDailyCode(otherSecret, '2026-09-22');
+    expect(verifyDailyCode(secret, code, '2026-09-22')).toBe(false);
   });
 });

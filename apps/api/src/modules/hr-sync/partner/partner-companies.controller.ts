@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentPrincipal } from '../../../common/decorators/current-principal.decorator';
@@ -57,5 +57,32 @@ export class PartnerCompaniesController {
   ) {
     if (!file) throw new BadRequestException({ code: 'PARTNER_EXCEL_FILE_REQUIRED', message: '파일이 필요합니다.' });
     return this.excelService.importForCompany(id, principal, file.buffer);
+  }
+
+  @Post(':id/admins')
+  @ApiOperation({ summary: '협력업체 관리자 계정 발급(수정사항) — 임시 비밀번호는 이 응답에서만 노출된다' })
+  registerAdmin(
+    @Param('id') id: string,
+    @CurrentPrincipal() principal: EmployeePrincipal,
+    @Body() body: { employeeNo: string; name: string; primarySiteId: string },
+  ) {
+    return this.service.registerAdmin(id, principal, body);
+  }
+
+  @Post(':id/employees/:employeeId/resign')
+  @ApiOperation({ summary: '파견직 퇴사자 등록(수정사항)' })
+  resignEmployee(
+    @Param('id') id: string,
+    @Param('employeeId') employeeId: string,
+    @CurrentPrincipal() principal: EmployeePrincipal,
+    @Body() body: { resignationDate: string },
+  ) {
+    return this.service.resignEmployee(id, employeeId, principal, body);
+  }
+
+  @Get(':id/labor-cost')
+  @ApiOperation({ summary: '파견직 인건비 확인(수정사항) — 등록된 임금요율 기준(실지급액 아님)' })
+  laborCost(@Param('id') id: string, @Query('asOfDate') asOfDate: string) {
+    return this.service.laborCost(id, asOfDate);
   }
 }

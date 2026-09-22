@@ -8,6 +8,7 @@ import { CompensatoryLeaveAdminController } from './compensatory-leave-admin.con
 import { CompensatoryLeaveAgreementService } from './compensatory-leave-agreement.service';
 import { CompensatoryLeaveService } from './compensatory-leave.service';
 import { LeaveAccrualAdminController } from './leave-accrual-admin.controller';
+import { LeaveBalanceAdminController } from './leave-balance-admin.controller';
 import { LeaveBalanceMeController } from './leave-balance-me.controller';
 import { LeaveBalanceMeService } from './leave-balance-me.service';
 import { LeaveBalanceService } from './leave-balance.service';
@@ -33,6 +34,7 @@ import { LeaveTypeService } from './leave-type.service';
     LeaveRequestMeController,
     LeaveRequestApprovalController,
     LeaveBalanceMeController,
+    LeaveBalanceAdminController,
     LeaveAccrualAdminController,
     LeavePromotionAdminController,
     LeavePromotionPolicyAdminController,

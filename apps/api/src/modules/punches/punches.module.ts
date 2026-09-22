@@ -9,11 +9,12 @@ import { GeofenceService } from './geofence.service';
 import { PunchesController } from './punches.controller';
 import { PunchesService } from './punches.service';
 import { QrNfcVerificationService } from './qr-nfc-verification.service';
+import { QrPosterController } from './qr-poster.controller';
 import { QrSecretProvisioningService } from './qr-secret-provisioning.service';
 
 @Module({
   imports: [PunchModule, PunchPolicyModule, AuthModule, RecalculationModule, FraudDetectionModule, KioskDevicesModule],
-  controllers: [PunchesController],
+  controllers: [PunchesController, QrPosterController],
   providers: [PunchesService, GeofenceService, QrNfcVerificationService, QrSecretProvisioningService],
   exports: [PunchesService, QrSecretProvisioningService],
 })

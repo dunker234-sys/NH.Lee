@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HrSyncPolicyResolverModule } from '../../common/policy/hr-sync-policy-resolver.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PayrollCloseModule } from '../payroll-close/payroll-close.module';
 import { ApiHrSourceAdapter } from './adapters/api-hr-source.adapter';
 import { DB_QUERY_RUNNER } from './adapters/db-query-runner';
 import { DbHrSourceAdapter } from './adapters/db-hr-source.adapter';
@@ -40,6 +41,7 @@ import { MePartnerController } from './partner/me-partner.controller';
     }),
     HrSyncPolicyResolverModule,
     NotificationsModule,
+    PayrollCloseModule,
   ],
   controllers: [HrSyncController, PartnerCompaniesController, MePartnerController],
   providers: [

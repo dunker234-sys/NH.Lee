@@ -2,8 +2,21 @@ import { Injectable } from '@nestjs/common';
 import { LeaveBalance, LeaveRequest } from '@prisma/client';
 import { leaveUnitDayFraction } from '@attendance/core-rules';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { OrgScope } from '../../common/scope/org-scope.types';
+import { assertScope, assertSiteInScope } from '../../common/scope/scope.util';
 import { dateOnly } from '../../common/time/week.util';
 import { LeaveInsufficientBalanceError } from './errors/leave-errors';
+
+export interface ActiveEmployeeBalanceRow {
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  referencePeriod: string | null;
+  grantedDays: number;
+  carriedOverDays: number;
+  usedDays: number;
+  remainingDays: number;
+}
 
 /**
  * LeaveBalance.usedDays를 만지는 유일한 경로. deduct/restore 둘 다
@@ -27,6 +40,42 @@ export class LeaveBalanceService {
       if (remaining.gt(0)) return balance;
     }
     return balances[0] ?? null;
+  }
+
+  /**
+   * 재직자 연차 현황(수정사항: 연차 배치 관리). ACTIVE 직원 전원 × ANNUAL
+   * LeaveType에 대해 asOfDate 기준 사용 가능한 잔액을 findUsableBalance()와
+   * 동일한 규칙(만료일 빠른 순, 잔액>0 우선)으로 조회한다 — 별도 계산 로직을
+   * 새로 만들지 않는다.
+   */
+  async listActiveEmployeeBalances(scope: OrgScope, siteId: string, asOfDate: string): Promise<ActiveEmployeeBalanceRow[]> {
+    assertScope(scope);
+    assertSiteInScope(scope, siteId);
+
+    const annualLeaveType = await this.prisma.leaveType.findFirst({ where: { category: 'ANNUAL' } });
+    if (!annualLeaveType) return [];
+
+    const employees = await this.prisma.employee.findMany({
+      where: { status: 'ACTIVE', primarySiteId: siteId },
+      select: { id: true, employeeNo: true, name: true },
+      orderBy: { employeeNo: 'asc' },
+    });
+
+    const results: ActiveEmployeeBalanceRow[] = [];
+    for (const employee of employees) {
+      const balance = await this.findUsableBalance(employee.id, annualLeaveType.id, asOfDate);
+      results.push({
+        employeeId: employee.id,
+        employeeNo: employee.employeeNo,
+        employeeName: employee.name,
+        referencePeriod: balance?.referencePeriod ?? null,
+        grantedDays: balance ? balance.grantedDays.toNumber() : 0,
+        carriedOverDays: balance ? balance.carriedOverDays.toNumber() : 0,
+        usedDays: balance ? balance.usedDays.toNumber() : 0,
+        remainingDays: balance ? balance.grantedDays.plus(balance.carriedOverDays).minus(balance.usedDays).toNumber() : 0,
+      });
+    }
+    return results;
   }
 
   async deduct(leaveBalanceId: string, days: number): Promise<LeaveBalance> {

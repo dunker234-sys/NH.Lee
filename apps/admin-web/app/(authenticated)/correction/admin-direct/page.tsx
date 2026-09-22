@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { ApiError } from '../../../../lib/apiClient';
 import { usePrincipal } from '../../../../lib/usePrincipal';
@@ -29,10 +30,10 @@ function ErrorMessage({ error }: { error: unknown }) {
   return <p className="mt-2 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">{message}</p>;
 }
 
-function CreateForm() {
-  const [siteId, setSiteId] = useState('');
-  const [employeeId, setEmployeeId] = useState('');
-  const [targetWorkDate, setTargetWorkDate] = useState('');
+function CreateForm({ initialSiteId, initialEmployeeId, initialWorkDate }: { initialSiteId: string; initialEmployeeId: string; initialWorkDate: string }) {
+  const [siteId, setSiteId] = useState(initialSiteId);
+  const [employeeId, setEmployeeId] = useState(initialEmployeeId);
+  const [targetWorkDate, setTargetWorkDate] = useState(initialWorkDate);
   const [reasonCode, setReasonCode] = useState<CorrectionReasonCode>('PUNCH_MISSING');
   const [reasonDetail, setReasonDetail] = useState('');
   const [punchType, setPunchType] = useState<keyof typeof PUNCH_TYPE_LABEL>('IN');
@@ -69,7 +70,7 @@ function CreateForm() {
         mutation.mutate();
       }}
     >
-      <p className="text-sm text-slate-500">HQ_HR만 사용할 수 있습니다. 근로자 본인 신청이 아니라 관리자가 직접 지정하는 정정입니다(요구사항 4.7-4).</p>
+      <p className="text-sm text-slate-500">ADMIN만 사용할 수 있습니다. 근로자 본인 신청이 아니라 관리자가 직접 지정하는 정정입니다(요구사항 4.7-4).</p>
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700">사업장</label>
         <select
@@ -198,17 +199,22 @@ export default function AdminCorrectionPage() {
   const [historySiteId, setHistorySiteId] = useState('');
   const principalQuery = usePrincipal();
   const sitesQuery = useQuery({ queryKey: ['sites', 'mine'], queryFn: () => sitesApi.listMine() });
+  const searchParams = useSearchParams();
 
   if (principalQuery.isLoading) return <p className="text-slate-500">불러오는 중...</p>;
   const role = principalQuery.data?.principal.role;
   if (!role || !ALLOWED_ROLES.has(role)) {
-    return <p className="text-slate-600">이 화면은 HQ_HR 권한만 볼 수 있습니다.</p>;
+    return <p className="text-slate-600">이 화면은 ADMIN 권한만 볼 수 있습니다.</p>;
   }
 
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-xl font-bold">직권 정정</h1>
-      <CreateForm />
+      <CreateForm
+        initialSiteId={searchParams.get('siteId') ?? ''}
+        initialEmployeeId={searchParams.get('employeeId') ?? ''}
+        initialWorkDate={searchParams.get('targetWorkDate') ?? ''}
+      />
 
       <div>
         <div className="mb-2 flex items-center justify-between">

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { SchedulePolicyModule } from '../../common/policy/schedule-policy.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { PayrollCloseModule } from '../payroll-close/payroll-close.module';
 import { RosterGenerationController } from './roster-generation.controller';
 import { RosterGenerationService } from './roster-generation.service';
 import { ScheduleAggregationService } from './schedule-aggregation.service';
@@ -19,7 +20,7 @@ import { ShiftTemplateRepository } from './shift-template.repository';
 import { ShiftTemplateService } from './shift-template.service';
 
 @Module({
-  imports: [SchedulePolicyModule, NotificationsModule],
+  imports: [SchedulePolicyModule, NotificationsModule, PayrollCloseModule],
   controllers: [
     ShiftTemplateController,
     ScheduleController,

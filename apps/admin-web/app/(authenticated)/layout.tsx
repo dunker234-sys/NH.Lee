@@ -35,6 +35,12 @@ const NAV_ITEMS = [
   { href: '/employees/protected-status', label: '보호 상태 등록', roles: ['ADMIN'] },
 ];
 
+/** PARTNER 역할은 위 전체 관리자 네비게이션 대신 이 최소 셸만 본다(수정사항:
+ * 협력업체 관리자 등록). roles 없는 항목(대시보드/PC타각/근무스케쥴 등)은
+ * "인증된 모두"에게 보이는 기존 필터 규칙상 PARTNER에게도 노출돼버리므로,
+ * 기존 NAV_ITEMS를 그대로 재사용하지 않고 별도 배열로 완전히 분리한다. */
+const PARTNER_NAV_ITEMS = [{ href: '/partner/employees', label: '소속 직원 현황' }];
+
 /** 이 그룹 아래 모든 페이지가 공유하는 인증 앱 셸(사이드바+세션 가드).
  * STEP5-B는 로그인+타각 위젯뿐이라 셸이 없었다 — 이번이 admin-web
  * 최초의 "실제 규모" 레이아웃이다. */
@@ -61,21 +67,30 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
     staleTime: 5 * 60 * 1000,
   });
 
-  if (!checked || !session) return null;
-
   const role = principalQuery.data?.principal.role;
+  const isPartner = role === 'PARTNER';
+
+  useEffect(() => {
+    if (isPartner && !pathname.startsWith('/partner')) {
+      router.replace('/partner/employees');
+    }
+  }, [isPartner, pathname, router]);
+
+  if (!checked || !session) return null;
 
   function handleLogout() {
     authStore.clear();
     router.replace('/login');
   }
 
+  const navItems = isPartner ? PARTNER_NAV_ITEMS : NAV_ITEMS.filter((item) => !item.roles || (role && item.roles.includes(role)));
+
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white p-4">
+      <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white p-4 print:hidden">
         <p className="mb-6 text-sm font-semibold text-slate-500">근태관리 관리자</p>
         <nav className="flex-1 space-y-1">
-          {NAV_ITEMS.filter((item) => !item.roles || (role && item.roles.includes(role))).map((item) => {
+          {navItems.map((item) => {
             const active = pathname === item.href || (item.href !== '/punch' && pathname.startsWith(item.href));
             return (
               <Link
@@ -98,7 +113,7 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
           </button>
         </div>
       </aside>
-      <main className="flex-1 overflow-x-auto p-8">{children}</main>
+      <main className="flex-1 overflow-x-auto p-8 print:p-0">{children}</main>
     </div>
   );
 }

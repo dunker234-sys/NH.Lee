@@ -1,4 +1,4 @@
-import { apiFetch } from '../apiClient';
+import { apiFetch, buildQuery } from '../apiClient';
 
 export type HrSyncBatchStatus = 'PENDING_REVIEW' | 'AUTO_APPLIED' | 'APPLIED' | 'REJECTED';
 export type HrSyncRowChangeType = 'NEW' | 'CHANGED' | 'DEPARTED' | 'ERROR';
@@ -51,6 +51,14 @@ export interface PartnerCompany {
   active: boolean;
 }
 
+export interface PartnerLaborCostRow {
+  employeeId: string;
+  employeeNo: string;
+  name: string;
+  wageType: string | null;
+  baseAmount: number | null;
+}
+
 /** 파견·협력업체 관리 — 협력사 자체는 org-scope 개념이 아니라 HQ_HR/ADMIN
  * 역할 게이트만 적용된다. */
 export const partnerCompanyApi = {
@@ -62,4 +70,30 @@ export const partnerCompanyApi = {
     id: string,
     input: { employeeNo: string; name: string; primarySiteId: string; hireDate: string; jobTitle?: string; department?: string },
   ) => apiFetch(`/admin/partner-companies/${id}/employees`, { method: 'POST', body: input }),
+  /** 협력업체 관리자 계정 발급(수정사항) — 응답의 tempPassword는 이번 한 번만 노출된다. */
+  registerAdmin: (id: string, input: { employeeNo: string; name: string; primarySiteId: string }) =>
+    apiFetch<{ id: string; employeeNo: string; tempPassword: string }>(`/admin/partner-companies/${id}/admins`, { method: 'POST', body: input }),
+  /** 파견직 퇴사자 등록(수정사항). */
+  resignEmployee: (id: string, employeeId: string, input: { resignationDate: string }) =>
+    apiFetch(`/admin/partner-companies/${id}/employees/${employeeId}/resign`, { method: 'POST', body: input }),
+  /** 파견직 인건비 확인(수정사항) — 등록된 요율 기준(실지급액 아님). */
+  laborCost: (id: string, asOfDate: string) =>
+    apiFetch<PartnerLaborCostRow[]>(`/admin/partner-companies/${id}/labor-cost${buildQuery({ asOfDate })}`),
+};
+
+export interface MyPartnerEmployee {
+  id: string;
+  employeeNo: string;
+  name: string;
+  status: string;
+  employmentType: string;
+  hireDate: string;
+  resignationDate: string | null;
+  jobTitle: string | null;
+  department: string | null;
+}
+
+/** 협력사 담당자(PARTNER 역할) self-service 조회(수정사항). */
+export const mePartnerApi = {
+  listMyEmployees: () => apiFetch<MyPartnerEmployee[]>('/me/partner/employees'),
 };

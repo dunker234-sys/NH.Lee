@@ -64,6 +64,49 @@ export interface ScheduleVsActualRow {
   actualWorkMinutes: number | null;
 }
 
+export interface ActualReportDayRow {
+  workDate: string;
+  scheduleStatus: string | null;
+  plannedStartAt: string | null;
+  plannedEndAt: string | null;
+  actualExists: boolean;
+  isAbsence: boolean | null;
+  latenessMinutes: number | null;
+  earlyLeaveMinutes: number | null;
+  actualWorkMinutes: number | null;
+  approvedOvertimeMinutes: number | null;
+  unapprovedOvertimeMinutes: number | null;
+  nightWorkMinutes: number | null;
+  holidayWorkMinutesNormal: number | null;
+  holidayWorkMinutesExcess: number | null;
+  consecutiveDayNumber: number | null;
+  dailyWageAmount: number | null;
+}
+
+export interface ActualReportWeekSummary {
+  weekStartDate: string;
+  weeklyPaidRestEligible: boolean;
+  weeklyPaidRestMinutes: number;
+  weeklyPaidRestPayAmount: number;
+}
+
+export interface ActualReportEmployeeRow {
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  days: ActualReportDayRow[];
+  weeklySummaries: ActualReportWeekSummary[];
+  monthTotal: {
+    actualWorkMinutes: number;
+    approvedOvertimeMinutes: number;
+    unapprovedOvertimeMinutes: number;
+    holidayWorkMinutesNormal: number;
+    holidayWorkMinutesExcess: number;
+    weeklyPaidRestPayAmount: number;
+    totalWageAmount: number;
+  };
+}
+
 export const scheduleApi = {
   listShiftTemplates(siteId: string): Promise<ShiftTemplate[]> {
     return apiFetch(`/admin/schedule/shift-templates?siteId=${siteId}`);
@@ -129,5 +172,8 @@ export const scheduleApi = {
 
   scheduleVsActual(siteId: string, yearMonth: string): Promise<ScheduleVsActualRow[]> {
     return apiFetch(`/admin/schedule/reports/schedule-vs-actual?siteId=${siteId}&yearMonth=${yearMonth}`);
+  },
+  actualReport(siteId: string, yearMonth: string): Promise<ActualReportEmployeeRow[]> {
+    return apiFetch(`/admin/schedule/reports/actual?siteId=${siteId}&yearMonth=${yearMonth}`);
   },
 };

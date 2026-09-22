@@ -15,6 +15,23 @@ import { PayrollPolicyResolverService } from '../../common/policy/payroll-policy
 import { canonicalJson, sha256 } from '../../common/crypto/hash.util';
 import { addDays, mondayOfWeek, monthRange } from '../../common/time/week.util';
 
+export interface WeeklyPaidRestSummaryRow {
+  employeeId: string;
+  weekStartDate: string;
+  eligible: boolean;
+  minutes: number;
+  payAmount: number;
+}
+
+const ZERO_WAGE_STATEMENT_LINE = {
+  scheduledWorkMinutes: 0,
+  approvedOvertimeMinutes: 0,
+  nightWorkMinutes: 0,
+  holidayWorkMinutesNormal: 0,
+  holidayWorkMinutesExcess: 0,
+  weeklyPaidRestMinutes: 0,
+};
+
 export interface ComputedPayrollStatementLine {
   employeeId: string;
   layoutType: 'MONTHLY' | 'DAILY';
@@ -56,7 +73,15 @@ export class PayrollStatementComputationService {
     private readonly policyResolver: PayrollPolicyResolverService,
   ) {}
 
-  async compute(siteId: string, periodYearMonth: string): Promise<ComputedPayrollStatementLine[]> {
+  /**
+   * layoutOverride: 급여마감 흐름은 넘기지 않는다(기존 동작 불변) — 근무스케쥴(실적)
+   * 리포트(수정사항)가 월급제 직원도 일자별 라인을 받으려고 'DAILY'를 강제할 때만 쓴다.
+   */
+  async compute(
+    siteId: string,
+    periodYearMonth: string,
+    layoutOverride?: 'DAILY' | 'MONTHLY',
+  ): Promise<ComputedPayrollStatementLine[]> {
     const { start, end } = monthRange(periodYearMonth);
     const paddedStart = addDays(start.toISOString().slice(0, 10), -6);
     const paddedEnd = addDays(end.toISOString().slice(0, 10), 6);
@@ -124,7 +149,7 @@ export class PayrollStatementComputationService {
     for (const employee of employees) {
       const allDays = daysByEmployee.get(employee.id) ?? [];
       const monthDays = allDays.filter((d) => d.workDate >= start && d.workDate < end);
-      const layoutType = selectPayrollLayoutType(employee.employmentType);
+      const layoutType = layoutOverride ?? selectPayrollLayoutType(employee.employmentType);
 
       const sourceDays: PayrollStatementSourceDay[] = monthDays.map((d) => ({
         workDate: d.workDate.toISOString().slice(0, 10),
@@ -199,6 +224,92 @@ export class PayrollStatementComputationService {
           breakdown: [...synthesis.breakdown, { type: 'WAGE_BREAKDOWN', source: amounts.breakdown }],
           inputSnapshotHash,
         });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * 주휴수당 주 단위 요약(수정사항: 근무스케쥴(실적) 리포트). DAILY 레이아웃의
+   * compute() 라인은 주휴가 특정 하루에 대응되지 않아 항상 0으로 비워지므로
+   * (synthesizePayrollStatement 참고), 리포트가 필요로 하는 "주 단위 주휴 대상/분/금액"은
+   * 여기서 별도로 계산한다 — compute()와 동일한 순수함수(calculateWeeklyPaidRestMinutes,
+   * calculatePayrollAmounts)를 재사용해 이중 계산 로직을 만들지 않는다.
+   */
+  async computeWeeklyPaidRestSummary(siteId: string, periodYearMonth: string): Promise<WeeklyPaidRestSummaryRow[]> {
+    const { start, end } = monthRange(periodYearMonth);
+    const paddedStart = addDays(start.toISOString().slice(0, 10), -6);
+    const paddedEnd = addDays(end.toISOString().slice(0, 10), 6);
+    const paddedStartDate = new Date(`${paddedStart}T00:00:00.000Z`);
+    const paddedEndDate = new Date(`${paddedEnd}T00:00:00.000Z`);
+
+    const [dailyRows, employees] = await Promise.all([
+      this.prisma.attendanceDaily.findMany({
+        where: { siteId, workDate: { gte: paddedStartDate, lt: paddedEndDate } },
+        select: { employeeId: true, workDate: true, scheduledWorkMinutes: true },
+      }),
+      this.prisma.employee.findMany({
+        where: { primarySiteId: siteId, attendanceDaily: { some: { siteId, workDate: { gte: start, lt: end } } } },
+        select: { id: true },
+      }),
+    ]);
+    if (employees.length === 0) return [];
+
+    const employeeIds = employees.map((e) => e.id);
+    const weekStartDates = [...new Set(dailyRows.map((r) => mondayOfWeek(r.workDate.toISOString().slice(0, 10))))];
+
+    const [weeklyRows, wageRates, policy] = await Promise.all([
+      this.prisma.attendanceWeekly.findMany({
+        where: { employeeId: { in: employeeIds }, weekStartDate: { in: weekStartDates.map((d) => new Date(`${d}T00:00:00.000Z`)) } },
+        select: { employeeId: true, weekStartDate: true, weeklyPaidRestEligible: true },
+      }),
+      this.prisma.employeeWageRate.findMany({
+        where: { employeeId: { in: employeeIds }, effectiveStartDate: { lte: end } },
+        orderBy: { effectiveStartDate: 'desc' },
+      }),
+      this.policyResolver.resolve(siteId, end),
+    ]);
+
+    const daysByEmployee = groupBy(dailyRows, (r) => r.employeeId);
+    const weeklyByEmployee = groupBy(weeklyRows, (r) => r.employeeId);
+    const wageRateByEmployee = new Map<string, (typeof wageRates)[number]>();
+    for (const wr of wageRates) {
+      if (!wageRateByEmployee.has(wr.employeeId)) wageRateByEmployee.set(wr.employeeId, wr);
+    }
+
+    const results: WeeklyPaidRestSummaryRow[] = [];
+    for (const employee of employees) {
+      const allDays = daysByEmployee.get(employee.id) ?? [];
+      const weekBuckets = groupBy(allDays, (d) => mondayOfWeek(d.workDate.toISOString().slice(0, 10)));
+      const weeklyEligibleByWeek = new Map(
+        (weeklyByEmployee.get(employee.id) ?? []).map((w) => [w.weekStartDate.toISOString().slice(0, 10), w.weeklyPaidRestEligible ?? false]),
+      );
+      const wageRate = wageRateByEmployee.get(employee.id);
+      const ordinaryHourlyWageAmount = wageRate
+        ? calculateOrdinaryHourlyWage({
+            wageRate: { wageType: wageRate.wageType, baseAmount: Number(wageRate.baseAmount) },
+            policy: { monthlyOrdinaryWageDivisorMinutes: policy.monthlyOrdinaryWageDivisorMinutes },
+          })
+        : 0;
+
+      for (const [weekStartDate, days] of weekBuckets) {
+        if (!weeklyEligibleByWeek.has(weekStartDate)) continue;
+        const eligible = weeklyEligibleByWeek.get(weekStartDate) ?? false;
+        const weeklyScheduledMinutes = days.reduce((sum, d) => sum + d.scheduledWorkMinutes, 0);
+        const scheduledWorkdayCount = days.filter((d) => d.scheduledWorkMinutes > 0).length;
+        const { minutes } = calculateWeeklyPaidRestMinutes({ eligible, weeklyScheduledMinutes, scheduledWorkdayCount });
+
+        const payAmount = wageRate
+          ? calculatePayrollAmounts({
+              wageRate: { wageType: wageRate.wageType, baseAmount: Number(wageRate.baseAmount) },
+              ordinaryHourlyWageAmount,
+              statementLine: { ...ZERO_WAGE_STATEMENT_LINE, weeklyPaidRestMinutes: minutes },
+              policy,
+            }).weeklyPaidRestPayAmount
+          : 0;
+
+        results.push({ employeeId: employee.id, weekStartDate, eligible, minutes, payAmount });
       }
     }
 

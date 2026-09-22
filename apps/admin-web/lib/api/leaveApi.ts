@@ -75,6 +75,29 @@ export const compensatoryLeaveApi = {
 
 export const leaveAccrualApi = {
   run: (asOfDate: string, siteId?: string) => apiFetch('/admin/leave/accrual/run', { method: 'POST', body: { asOfDate, siteId } }),
+  /** 회계연도 전환 소급 재계산(수정사항) — 기존 LeaveBalance를 덮어쓴다. ADMIN 전용. */
+  migrateToFiscalYear: (siteId: string, asOfDate: string) =>
+    apiFetch<{ processedCount: number; employeeIds: string[] }>('/admin/leave/accrual/migrate-to-fiscal-year', {
+      method: 'POST',
+      body: { siteId, asOfDate },
+    }),
+};
+
+export interface ActiveEmployeeBalanceRow {
+  employeeId: string;
+  employeeNo: string;
+  employeeName: string;
+  referencePeriod: string | null;
+  grantedDays: number;
+  carriedOverDays: number;
+  usedDays: number;
+  remainingDays: number;
+}
+
+/** 재직자 연차 현황(수정사항: 연차 배치 관리 화면 목적 변경). */
+export const leaveBalanceApi = {
+  listActive: (siteId: string, asOfDate: string) =>
+    apiFetch<ActiveEmployeeBalanceRow[]>(`/admin/leave/balances${buildQuery({ siteId, asOfDate })}`),
 };
 
 export const leavePromotionApi = {

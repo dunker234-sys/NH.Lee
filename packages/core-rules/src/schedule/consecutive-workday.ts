@@ -55,3 +55,28 @@ export function checkConsecutiveWorkdayLimit(input: ConsecutiveWorkdayCheckInput
   );
   return { violated: runs.length > 0, reasons, runs };
 }
+
+export interface ConsecutiveWorkdayNumbering {
+  workDate: string;
+  consecutiveDayNumber: number;
+}
+
+/**
+ * 근무스케쥴(실적) 리포트의 "6일차" 표기 전용(수정사항). 상한 위반 여부와 무관하게
+ * 연속 근무 구간 안에서 며칠째인지 순번만 매긴다 — 급여 산정에 영향을 주는 값이
+ * 아니라 정보 표시용이므로 저장하지 않는다(checkConsecutiveWorkdayLimit과 달리
+ * 위반 판정이 아니다).
+ */
+export function numberConsecutiveWorkdays(workDates: string[]): ConsecutiveWorkdayNumbering[] {
+  const result: ConsecutiveWorkdayNumbering[] = [];
+  let runLength = 0;
+  let prev: string | null = null;
+
+  for (const date of workDates) {
+    runLength = prev !== null && isNextCalendarDay(prev, date) ? runLength + 1 : 1;
+    result.push({ workDate: date, consecutiveDayNumber: runLength });
+    prev = date;
+  }
+
+  return result;
+}

@@ -10,15 +10,8 @@ export function generateTotpSecret(): string {
   return randomBytes(20).toString('hex');
 }
 
-function hotp(secretHex: string, counter: number): string {
-  const key = Buffer.from(secretHex, 'hex');
-  const counterBuf = Buffer.alloc(8);
-  // 64비트 빅엔디안 카운터. JS 숫자는 53비트까지 안전 — 초 단위 카운터가
-  // 그 한계에 도달하려면 약 2.85억 년이 걸려 실무상 문제되지 않는다.
-  counterBuf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
-  counterBuf.writeUInt32BE(counter % 0x100000000, 4);
-
-  const hmac = createHmac('sha1', key).update(counterBuf).digest();
+/** RFC4226 동적 트렁케이션(Dynamic Truncation) — HMAC 다이제스트를 6자리 숫자로 자른다. */
+function truncate(hmac: Buffer): string {
   const offset = hmac[hmac.length - 1] & 0x0f;
   const binCode =
     ((hmac[offset] & 0x7f) << 24) |
@@ -27,6 +20,33 @@ function hotp(secretHex: string, counter: number): string {
     (hmac[offset + 3] & 0xff);
 
   return (binCode % 1000000).toString().padStart(6, '0');
+}
+
+function hotp(secretHex: string, counter: number): string {
+  const key = Buffer.from(secretHex, 'hex');
+  const counterBuf = Buffer.alloc(8);
+  // 64비트 빅엔디안 카운터. JS 숫자는 53비트까지 안전 — 초 단위 카운터가
+  // 그 한계에 도달하려면 약 2.85억 년이 걸려 실무상 문제되지 않는다.
+  counterBuf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
+  counterBuf.writeUInt32BE(counter % 0x100000000, 4);
+
+  return truncate(createHmac('sha1', key).update(counterBuf).digest());
+}
+
+/** 시간 스텝이 아니라 근로일(work_date, Asia/Seoul) 문자열을 HMAC 메시지로 쓰는
+ * 정적 코드 — TOTP(초 단위 스텝)와 달리 KST 자정에만 값이 바뀐다. 인쇄해서
+ * 하루 종일 붙여두는 포스터 QR 전용(수정사항: PC 타각 일단위 QR 출력). */
+function hotpFromWorkDate(secretHex: string, workDate: string): string {
+  const key = Buffer.from(secretHex, 'hex');
+  return truncate(createHmac('sha1', key).update(`DAILY:${workDate}`, 'utf8').digest());
+}
+
+export function generateDailyCode(secretHex: string, workDate: string): string {
+  return hotpFromWorkDate(secretHex, workDate);
+}
+
+export function verifyDailyCode(secretHex: string, submittedCode: string, workDate: string): boolean {
+  return hotpFromWorkDate(secretHex, workDate) === submittedCode;
 }
 
 function stepOf(periodSeconds: number, at: Date): number {

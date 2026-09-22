@@ -149,25 +149,27 @@ export class PunchesService {
     const workDate = deriveWorkDate(recordedAt);
     const policy = await this.policyResolver.resolve(site.id, workDate);
 
-    const [geofenceEval, verificationEval] = await Promise.all([
-      this.geofenceService.evaluate(
-        site,
-        dto.location,
-        employeeId,
-        workDate,
-        policy.geofenceAccuracyThresholdM,
-        dto.outOfGeofenceReason,
-      ),
-      this.qrNfcService.evaluate(
-        site,
-        dto.registrationMethod,
-        dto.qrOrNfcToken,
-        deviceTrusted,
-        dto.wifiBssid,
-        dto.cellId,
-        policy,
-      ),
-    ]);
+    // 지오펜스 판정을 먼저 끝낸다 — 인쇄용 일단위 QR(수정사항)은 검증 시 Wi-Fi/Cell
+    // 대역신호 대신 이 결과를 쓰므로, 더 이상 두 평가를 독립적으로 병렬 실행할 수 없다.
+    const geofenceEval = await this.geofenceService.evaluate(
+      site,
+      dto.location,
+      employeeId,
+      workDate,
+      policy.geofenceAccuracyThresholdM,
+      dto.outOfGeofenceReason,
+    );
+    const verificationEval = await this.qrNfcService.evaluate(
+      site,
+      dto.registrationMethod,
+      dto.qrOrNfcToken,
+      deviceTrusted,
+      dto.wifiBssid,
+      dto.cellId,
+      policy,
+      deriveWorkDateString(recordedAt),
+      !geofenceEval.isLow,
+    );
 
     const flags = new Set<string>([...geofenceEval.integrityFlags, ...verificationEval.integrityFlags]);
     if (!deviceTrusted) flags.add('DEVICE_NOT_TRUSTED');
