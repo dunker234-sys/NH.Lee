@@ -1,12 +1,10 @@
 name: CI
 
-# STEP12: 테스트 → 빌드 → 스테이징 → 승인 후 운영. deploy-staging/production
-# 단계는 이 세션에 실제 클라우드 계정이 없어 자리표시자(placeholder)로만
-# 작성했다 — 실 배포는 AWS_ROLE_ARN/ECR_REPOSITORY/ECS_CLUSTER 등 시크릿을
-# 구성한 뒤 그 스텝을 채우면 된다. "승인 후 운영"은 GitHub Environments의
-# production 보호 규칙(Settings → Environments → production →
-# Required reviewers)으로 구현한다 — 코드로 강제할 수 없는 부분이라
-# 저장소 설정에서 별도로 켜야 한다(docs/ADMIN_MANUAL.md 참고).
+# STEP12: 테스트 → 빌드(+GHCR push) → 스테이징 → 승인 후 운영.
+# 운영 배포는 NCP VM 1대에 SSH로 접속해 docker compose로 올린다(infra/ncp/README.md).
+# 스테이징 서버는 아직 없어 deploy-staging은 자리표시자다(운영 job의 선행 조건만 충족).
+# "승인 후 운영"은 GitHub Environments의 production 보호 규칙(Required
+# reviewers)으로 구현하며 저장소 설정에 이미 켜 두었다.
 
 on:
   push:
@@ -110,34 +108,56 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # PR에서는 빌드 성공만 검증하고, main push에서만 GHCR에 이미지를 올린다.
   build:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH_IMAGES: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      PUBLIC_DOMAIN: ${{ vars.PUBLIC_DOMAIN || 'localhost' }}
     strategy:
       matrix:
         include:
           - name: api
             dockerfile: apps/api/Dockerfile
             target: runtime
+          - name: api-migrate
+            dockerfile: apps/api/Dockerfile
+            target: migrate
           - name: admin-web
             dockerfile: apps/admin-web/Dockerfile
             target: runtime
+            api_arg: NEXT_PUBLIC_API_BASE_URL
           - name: kiosk
             dockerfile: apps/kiosk/Dockerfile
             target: runtime
+            api_arg: VITE_API_BASE_URL
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: ${{ matrix.name }} 이미지 빌드(레지스트리 push 없음 — 빌드 성공만 검증)
+      - name: GHCR 로그인
+        if: env.PUSH_IMAGES == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: ${{ matrix.name }} 이미지 빌드
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
-          push: false
-          tags: attendance-${{ matrix.name }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: ${{ env.PUSH_IMAGES == 'true' }}
+          # 브라우저 앱은 API 주소가 빌드 시점에 번들에 박힌다(api.<도메인>).
+          build-args: |
+            ${{ matrix.api_arg && format('{0}=https://api.{1}', matrix.api_arg, env.PUBLIC_DOMAIN) || '' }}
+          tags: ghcr.io/${{ github.repository_owner }}/attendance-${{ matrix.name }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   deploy-staging:
     needs: build
@@ -147,21 +167,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: (placeholder) 스테이징 배포
-        run: |
-          echo "실 클라우드 계정 연결 후 이 스텝을 ECR push + ECS 서비스 업데이트로 채운다."
-          echo "필요 시크릿: AWS_ROLE_ARN, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE_STAGING"
-          echo "(infra/terraform 출력값과 대응 — infra/terraform/README.md 참고)"
+        run: echo "스테이징 서버가 생기면 deploy-production과 같은 방식으로 이 스텝을 채운다."
 
+  # NCP VM 1대에 SSH로 접속해 docker compose로 배포한다(infra/ncp/README.md 참고).
   deploy-production:
     needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # "승인 후 운영": GitHub Environments의 production 보호 규칙에
-    # Required reviewers를 설정해 두면, 이 job은 지정된 승인자가 실행을
-    # 승인하기 전까지 대기한다(저장소 Settings에서 별도 구성 필요).
+    # "승인 후 운영": production 환경의 Required reviewers가 승인할 때까지 대기한다.
+    # 아래 시크릿은 production 환경 시크릿으로 등록한다:
+    #   NCP_SSH_HOST, NCP_SSH_USER, NCP_SSH_KEY(배포 전용 개인키),
+    #   NCP_SSH_KNOWN_HOSTS(`ssh-keyscan -t ed25519 <host>` 결과 — 중간자 공격 방지)
     environment: production
+    concurrency: deploy-production
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: (placeholder) 운영 배포
+
+      - name: SSH 준비
+        env:
+          SSH_KEY: ${{ secrets.NCP_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.NCP_SSH_KNOWN_HOSTS }}
         run: |
-          echo "실 클라우드 계정 연결 후 이 스텝을 ECR push + ECS 서비스 업데이트로 채운다."
-          echo "필요 시크릿: AWS_ROLE_ARN, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE_PRODUCTION"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: 배포 파일 전송
+        env:
+          HOST: ${{ secrets.NCP_SSH_HOST }}
+          USER_: ${{ secrets.NCP_SSH_USER }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+          $SSH "$USER_@$HOST" 'mkdir -p /opt/attendance'
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            infra/ncp/docker-compose.prod.yml infra/ncp/Caddyfile infra/ncp/deploy.sh \
+            apps/api/prisma/roles.sql "$USER_@$HOST:/opt/attendance/"
+
+      - name: 배포 실행
+        env:
+          HOST: ${{ secrets.NCP_SSH_HOST }}
+          USER_: ${{ secrets.NCP_SSH_USER }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_REPO: ghcr.io/${{ github.repository_owner }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # GITHUB_TOKEN은 이 실행 동안만 유효하다. 서버에는 저장하지 않고 stdin으로만 넘긴다.
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$USER_@$HOST" \
+            "GHCR_USER='$GHCR_USER' IMAGE_REPO='$IMAGE_REPO' IMAGE_TAG='$IMAGE_TAG' bash /opt/attendance/deploy.sh"

@@ -20,6 +20,7 @@ import { RetentionModule } from './modules/retention/retention.module';
 import { OpsMonitoringModule } from './modules/ops-monitoring/ops-monitoring.module';
 import { AuditLogModule } from './common/audit/audit-log.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { HealthController } from './common/health/health.controller';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PrincipalGuard } from './common/guards/principal.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -92,6 +93,7 @@ import { SystemBatchModule } from './modules/system-batch/system-batch.module';
     RetentionModule,
     OpsMonitoringModule,
   ],
+  controllers: [HealthController],
   providers: [
     // 실행 순서: ThrottlerGuard(rate limit, 인증 전에 넘치는 요청부터 걸러
     // 낸다) → JwtAuthGuard(토큰 검증) → PrincipalGuard(DB에서 principal/scope
