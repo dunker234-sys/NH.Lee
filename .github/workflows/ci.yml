@@ -80,6 +80,10 @@ jobs:
       - name: core-rules 단위테스트(커버리지 90% 임계 포함)
         run: pnpm --filter @attendance/core-rules test:coverage
 
+      # migrate deploy는 Prisma 클라이언트를 생성하지 않는다 — 타입체크/테스트 전에 필요.
+      - name: Prisma 클라이언트 생성
+        run: pnpm --filter @attendance/api exec prisma generate
+
       - name: apps/api 타입체크
         run: pnpm --filter @attendance/api exec tsc --noEmit
 
