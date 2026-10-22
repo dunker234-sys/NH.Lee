@@ -73,6 +73,18 @@ jobs:
           PGPASSWORD: postgres_ci_password
         run: |
           psql -h localhost -U postgres -c "CREATE DATABASE attendance_test OWNER migrator;"
+          # roles.sql의 권한 부여는 `\c attendance` 이후라 attendance DB에만 적용된다.
+          # attendance_test에도 같은 권한(접속·스키마 USAGE·migrator가 만들 테이블의 기본 권한)을
+          # 마이그레이션 전에 부여해야 app_rw로 접속한 앱/테스트가 읽고 쓸 수 있다.
+          psql -h localhost -U postgres -d attendance_test -v ON_ERROR_STOP=1 <<'SQL'
+          GRANT CONNECT ON DATABASE attendance_test TO app_rw, migrator, retention_job;
+          GRANT ALL PRIVILEGES ON SCHEMA public TO migrator;
+          GRANT USAGE ON SCHEMA public TO app_rw, retention_job;
+          ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
+          ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO app_rw;
+          SQL
           cd apps/api
           DATABASE_URL=postgresql://migrator:migrator_dev_password@localhost:5432/attendance_test?schema=public npx prisma migrate deploy
           PGPASSWORD=migrator_dev_password psql -h localhost -U migrator -d attendance_test -v ON_ERROR_STOP=1 -f prisma/roles_post_migrate.sql
