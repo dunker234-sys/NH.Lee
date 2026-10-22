@@ -6,6 +6,7 @@ import { PrismaService } from '../src/common/prisma/prisma.service';
 import { RECALCULATION_QUEUE_NAME, RecalculationJobData } from '../src/modules/recalculation/queue.constants';
 import { NOTIFICATIONS_QUEUE_NAME, NotificationJobData } from '../src/modules/notifications/queue.constants';
 import { createTestApp } from './setup/app';
+import { recentWorkDate } from './setup/dates';
 import { resetDatabase } from './setup/db';
 import { login } from './setup/auth-helper';
 import { Fixture, loadFixture, loadPolicyConfigFixture, loadCorrectionPolicyConfigFixture } from './fixtures';
@@ -81,7 +82,7 @@ describe('정정/감사로그 조회 리포트 (STEP8)', () => {
       .set(auth(adminToken))
       .send({
         employeeId: fixture.employees.plainEmployeeA.id,
-        targetWorkDate: '2026-09-06',
+        targetWorkDate: recentWorkDate(6),
         reasonCode: 'OTHER',
         reasonDetail: '전량 추적 리포트 테스트',
         afterValue: { note: 'admin' },
@@ -102,7 +103,7 @@ describe('정정/감사로그 조회 리포트 (STEP8)', () => {
       .post('/me/correction-requests')
       .set(auth(employeeToken))
       .send({
-        targetWorkDate: '2026-09-07',
+        targetWorkDate: recentWorkDate(7),
         reasonCode: 'OTHER',
         reasonDetail: '감사로그 조회 테스트',
         afterValue: { note: 'x' },
