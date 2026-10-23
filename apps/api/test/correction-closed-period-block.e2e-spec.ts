@@ -6,6 +6,7 @@ import { PrismaService } from '../src/common/prisma/prisma.service';
 import { RECALCULATION_QUEUE_NAME, RecalculationJobData } from '../src/modules/recalculation/queue.constants';
 import { NOTIFICATIONS_QUEUE_NAME, NotificationJobData } from '../src/modules/notifications/queue.constants';
 import { createTestApp } from './setup/app';
+import { recentWorkDate } from './setup/dates';
 import { resetDatabase } from './setup/db';
 import { login } from './setup/auth-helper';
 import { Fixture, loadFixture, loadPolicyConfigFixture, loadCorrectionPolicyConfigFixture } from './fixtures';
@@ -70,12 +71,13 @@ describe('마감된 월의 정정 차단 (STEP8)', () => {
   });
 
   it('신청 시점엔 열려 있었지만 승인 시점에 마감된 경우 승인이 거부된다', async () => {
+    const raceWorkDate = recentWorkDate(5);
     const { accessToken: employeeToken } = await login(app, fixture.employees.plainEmployeeA.employeeNo, fixture.password, 'dev-correction-close-race');
     const submitRes = await request(app.getHttpServer())
       .post('/me/correction-requests')
       .set(auth(employeeToken))
       .send({
-        targetWorkDate: '2026-09-05',
+        targetWorkDate: raceWorkDate,
         reasonCode: 'OTHER',
         reasonDetail: '신청 후 마감되는 경쟁 상황 재현',
         afterValue: { note: 'x' },
@@ -84,7 +86,7 @@ describe('마감된 월의 정정 차단 (STEP8)', () => {
 
     // 신청 이후, 승인 전에 그 사업장·그 달이 마감됐다고 가정한다.
     await prisma.payrollClose.create({
-      data: { siteId: fixture.siteA.id, periodYearMonth: '2026-09', status: 'CLOSED', closedAt: new Date(), closedBy: fixture.employees.hqHr.id },
+      data: { siteId: fixture.siteA.id, periodYearMonth: raceWorkDate.slice(0, 7), status: 'CLOSED', closedAt: new Date(), closedBy: fixture.employees.hqHr.id },
     });
 
     const { accessToken: managerToken } = await login(app, fixture.employees.siteManagerA.employeeNo, fixture.password, 'dev-correction-close-race-mgr');

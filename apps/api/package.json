@@ -11,6 +11,8 @@
     "start:dev": "ts-node --transpile-only src/main.ts",
     "test": "jest",
     "test:e2e": "jest --config test/jest-e2e.json --runInBand",
+    "test:e2e:ci": "jest --config test/jest-e2e.json --runInBand --testPathIgnorePatterns \"punches-p95|punch-load-performance\"",
+    "test:perf": "jest --config test/jest-e2e.json --runInBand punches-p95 punch-load-performance",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",

@@ -1,0 +1,11 @@
+api.{$DOMAIN} {
+	reverse_proxy api:3000
+}
+
+admin.{$DOMAIN} {
+	reverse_proxy admin-web:3100
+}
+
+kiosk.{$DOMAIN} {
+	reverse_proxy kiosk:80
+}

@@ -6,6 +6,7 @@ import { PrismaService } from '../src/common/prisma/prisma.service';
 import { RECALCULATION_QUEUE_NAME, RecalculationJobData } from '../src/modules/recalculation/queue.constants';
 import { NOTIFICATIONS_QUEUE_NAME, NotificationJobData } from '../src/modules/notifications/queue.constants';
 import { mondayOfWeek, yearMonthOf } from '../src/common/time/week.util';
+import { recentWorkDate } from './setup/dates';
 import { createTestApp } from './setup/app';
 import { adminPrisma, resetDatabase } from './setup/db';
 import { login } from './setup/auth-helper';
@@ -67,7 +68,7 @@ describe('정정 승인 → 재계산 (STEP8)', () => {
 
   it('PUNCH_MISSING 정정은 1차(SITE_MANAGER) 승인만으로 일·주·월 집계에 반영된다', async () => {
     const employeeId = fixture.employees.plainEmployeeA.id;
-    const workDate = '2026-09-01';
+    const workDate = recentWorkDate(1);
 
     await prisma.punchRaw.create({
       data: {
@@ -154,7 +155,7 @@ describe('정정 승인 → 재계산 (STEP8)', () => {
       },
     });
 
-    const workDate = '2026-09-02';
+    const workDate = recentWorkDate(2);
     const { accessToken: employeeToken } = await login(app, fixture.employees.siteManagerB.employeeNo, fixture.password, 'dev-correction-e2e-siteb');
     const submitRes = await request(app.getHttpServer())
       .post('/me/correction-requests')
@@ -177,7 +178,7 @@ describe('정정 승인 → 재계산 (STEP8)', () => {
   }, 20000);
 
   it('HQ_HR은 PENDING에서 바로 APPROVED_L2로 1차를 건너뛸 수 있다', async () => {
-    const workDate = '2026-09-03';
+    const workDate = recentWorkDate(3);
     const { accessToken: employeeToken } = await login(app, fixture.employees.plainEmployeeA.employeeNo, fixture.password, 'dev-correction-e2e-skip');
     const submitRes = await request(app.getHttpServer())
       .post('/me/correction-requests')
@@ -201,7 +202,7 @@ describe('정정 승인 → 재계산 (STEP8)', () => {
 
   it('직권 정정(ADMIN)은 즉시 APPROVED_L2로 생성되고 근로자에게 통지된다', async () => {
     const employeeId = fixture.employees.plainEmployeeA.id;
-    const workDate = '2026-09-04';
+    const workDate = recentWorkDate(4);
 
     const { accessToken: adminToken } = await login(app, fixture.employees.admin.employeeNo, fixture.password, 'dev-correction-e2e-admin');
     const res = await request(app.getHttpServer())
