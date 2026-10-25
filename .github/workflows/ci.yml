@@ -41,6 +41,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks가 PR 커밋 범위(base^..head)를 git log로 읽는다 — 기본값(최신 1커밋)이면
+          # 범위를 찾지 못해 아무것도 스캔하지 못하고 실패한다.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:

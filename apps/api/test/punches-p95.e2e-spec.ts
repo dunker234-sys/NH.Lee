@@ -11,7 +11,7 @@ import { HR_SYNC_QUEUE_NAME } from '../src/modules/hr-sync/queue.constants';
 import { NOTIFICATIONS_QUEUE_NAME } from '../src/modules/notifications/queue.constants';
 import { createTestApp } from './setup/app';
 import { resetDatabase, adminPrisma } from './setup/db';
-import { login } from './setup/auth-helper';
+import { loginInChunks } from './setup/auth-helper';
 import {
   Fixture,
   loadFixture,
@@ -114,8 +114,9 @@ describe('POST /punches — P95 부하 테스트', () => {
     // 로그인(=기기 최초 등록)은 측정 구간 밖에서 미리 끝낸다 — 이미 신뢰된
     // 기기로 찍어야 DeviceBindingService의 1회성 audit_log 경로를 피해
     // 정상 운영 패턴(반복 사용)을 측정할 수 있다.
-    const tokens = await Promise.all(
-      employees.map((e) => login(app, e.employeeNo, password, `dev-load-${e.employeeNo}`)),
+    const tokens = await loginInChunks(
+      app,
+      employees.map((e) => ({ employeeNo: e.employeeNo, password, deviceId: `dev-load-${e.employeeNo}` })),
     );
 
     const recordedAt = '2026-06-15T09:00:00+09:00';
