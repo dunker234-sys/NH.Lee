@@ -60,6 +60,8 @@ describe('POST /punches — 출근 피크 분당 500건 지속 처리량 (STEP12
     await loadWeeklyAlertPolicyConfigFixture();
     await loadSiteIpAllowlistFixture(fixture.siteA.id, '127.0.0.1/32', '분당500건 부하테스트 루프백');
     app = await createTestApp();
+    // punches-p95.e2e-spec.ts와 같은 이유 — supertest가 서버를 열고 닫지 않게 직접 listen한다.
+    await app.listen(0);
 
     const recalcQueue = app.get<Queue>(getQueueToken(RECALCULATION_QUEUE_NAME));
     const fraudQueue = app.get<Queue>(getQueueToken(FRAUD_DETECTION_QUEUE_NAME));

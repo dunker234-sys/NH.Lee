@@ -48,6 +48,10 @@ describe('POST /punches — P95 부하 테스트', () => {
     // supertest는 ::ffff:127.0.0.1로 접속함)를 명시적으로 허용해 둔다.
     await loadSiteIpAllowlistFixture(fixture.siteA.id, '127.0.0.1/32', 'P95 테스트 루프백');
     app = await createTestApp();
+    // 서버를 직접 listen해 둔다 — listen 중이 아니면 supertest가 "첫 요청"에서 서버를 열고 그
+    // 응답이 끝나면 server.close()를 부른다. Node 19+의 close()는 유휴 연결도 끊어서, 100건
+    // 동시 요청 중 아직 요청 바이트가 도착하지 않은 새 연결이 ECONNRESET으로 끊긴다(2 vCPU CI 실측).
+    await app.listen(0);
 
     // Redis는 resetDatabase()가 건드리지 않는다 — 이전 스펙 파일들이 남긴
     // 큐 잔량이 이 부하 테스트의 측정치에 섞이지 않도록 시작 전에 비운다.
