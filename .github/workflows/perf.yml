@@ -100,4 +100,13 @@ jobs:
         working-directory: apps/api
         env:
           TEST_DATABASE_URL: postgresql://app_rw:app_rw_dev_password@localhost:5432/attendance_test?schema=public&connection_limit=10
+          # punches-p95에서 100건 동시 타각 중 Prisma 쿼리 엔진이 응답 없이 끊겼다 — 원인 진단용.
+          RUST_BACKTRACE: full
         run: pnpm test:perf
+
+      # 엔진이 끊긴 원인(메모리 부족 종료/패닉 등) 단서를 남긴다.
+      - name: 실패 진단 정보
+        if: failure()
+        run: |
+          echo "--- CPU/메모리"; nproc; free -m
+          echo "--- 커널 로그(OOM/segfault)"; sudo dmesg 2>&1 | grep -i -E "oom|killed process|segfault|out of memory" | tail -20 || true
