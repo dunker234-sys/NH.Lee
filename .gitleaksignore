@@ -1,0 +1,20 @@
+# gitleaks 오탐 등록 (전체 이력 스캔, 14건). 사용자 승인 후 정확한 fingerprint만 등록한다.
+# 형식: <commit-sha>:<file>:<rule>:<line>
+# 모두 실제 비밀이 아니다:
+#  - infra/terraform/secrets.tf:29  → 시크릿 이름(QR_TOTP_ENCRYPTION_KEY)과 자리표시자. 실제 값은 Secrets Manager에서 주입
+#  - prisma/*-policy-defaults.ts    → policy_config의 `key:` 이름과 숫자 기본값
+#  - test/*.e2e-spec.ts             → 테스트용 멱등키·기기 ID
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/prisma/night-work-health-checkup-policy-defaults.ts:generic-api-key:10
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/prisma/night-work-health-checkup-policy-defaults.ts:generic-api-key:12
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/prisma/night-work-health-checkup-policy-defaults.ts:generic-api-key:5
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/prisma/night-work-health-checkup-policy-defaults.ts:generic-api-key:6
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/prisma/night-work-health-checkup-policy-defaults.ts:generic-api-key:7
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/prisma/recalculation-policy-defaults.ts:generic-api-key:13
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/test/compliance-reports-and-dashboard.e2e-spec.ts:generic-api-key:109
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/test/compliance-reports-and-dashboard.e2e-spec.ts:generic-api-key:123
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/test/compliance-reports-and-dashboard.e2e-spec.ts:generic-api-key:83
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/test/compliance-reports-and-dashboard.e2e-spec.ts:generic-api-key:97
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/test/punch-raw-append-only-trigger.e2e-spec.ts:generic-api-key:52
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/test/punch-raw-append-only-trigger.e2e-spec.ts:generic-api-key:78
+2d5a794d9a4aff908e20b860984c5a3587f6bdbd:apps/api/test/punch-verification-level.e2e-spec.ts:generic-api-key:58
+8d51ddb6a916aa4805801697f8c5a0152d4bd3b3:infra/terraform/secrets.tf:generic-api-key:29
