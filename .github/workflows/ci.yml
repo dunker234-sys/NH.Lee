@@ -41,10 +41,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          # gitleaks가 PR 커밋 범위(base^..head)를 git log로 읽는다 — 기본값(최신 1커밋)이면
-          # 범위를 찾지 못해 아무것도 스캔하지 못하고 실패한다.
-          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -130,7 +126,19 @@ jobs:
           pnpm --filter @attendance/kiosk typecheck
           pnpm --filter @attendance/kiosk test
 
-      # STEP12 §A6 시크릿 관리: 하드코딩된 시크릿 회귀를 CI에서 자동 차단한다.
+  # STEP12 §A6 시크릿 관리: 하드코딩된 시크릿 회귀를 CI에서 자동 차단한다.
+  # gitleaks는 PR 커밋 범위(base^..head)를 git log로 읽으므로 전체 이력이 필요하다 — 얕은
+  # 체크아웃(기본값)에서는 범위를 찾지 못해 아무것도 스캔하지 못한 채 실패한다. 테스트 job의
+  # 환경은 건드리지 않도록 별도 job으로 분리했다.
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: 시크릿 스캔
         uses: gitleaks/gitleaks-action@v2
         env:
@@ -138,7 +146,7 @@ jobs:
 
   # PR에서는 빌드 성공만 검증하고, main push에서만 GHCR에 이미지를 올린다.
   build:
-    needs: test
+    needs: [test, secret-scan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
