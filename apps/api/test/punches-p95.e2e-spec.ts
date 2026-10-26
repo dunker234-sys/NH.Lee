@@ -2,7 +2,6 @@ import { getQueueToken } from '@nestjs/bullmq';
 import { INestApplication } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { Queue } from 'bullmq';
-import request from 'supertest';
 import { FRAUD_DETECTION_QUEUE_NAME } from '../src/modules/fraud-detection/queue.constants';
 import { RECALCULATION_QUEUE_NAME } from '../src/modules/recalculation/queue.constants';
 import { WEEKLY_RECALC_BATCH_QUEUE_NAME } from '../src/modules/recalculation/weekly-recalc-batch.queue.constants';
@@ -12,6 +11,7 @@ import { NOTIFICATIONS_QUEUE_NAME } from '../src/modules/notifications/queue.con
 import { createTestApp } from './setup/app';
 import { resetDatabase, adminPrisma } from './setup/db';
 import { loginInChunks } from './setup/auth-helper';
+import { postConcurrently } from './setup/external-load';
 import {
   Fixture,
   loadFixture,
@@ -45,12 +45,12 @@ describe('POST /punches — P95 부하 테스트', () => {
     // STEP5-B: registrationMethod:'PC'는 IpAllowlistGuard의 대상이라 fail-closed
     // 기본값 때문에 허용목록이 없으면 전부 403이 된다 — 이 스펙은 IP 정책이
     // 아니라 순수 처리량을 재므로 테스트 클라이언트의 실제 소켓 주소(127.0.0.1,
-    // supertest는 ::ffff:127.0.0.1로 접속함)를 명시적으로 허용해 둔다.
+    // 부하 생성기는 ::ffff:127.0.0.1로 접속함)를 명시적으로 허용해 둔다.
     await loadSiteIpAllowlistFixture(fixture.siteA.id, '127.0.0.1/32', 'P95 테스트 루프백');
     app = await createTestApp();
-    // 서버를 직접 listen해 둔다 — listen 중이 아니면 supertest가 "첫 요청"에서 서버를 열고 그
-    // 응답이 끝나면 server.close()를 부른다. Node 19+의 close()는 유휴 연결도 끊어서, 100건
-    // 동시 요청 중 아직 요청 바이트가 도착하지 않은 새 연결이 ECONNRESET으로 끊긴다(2 vCPU CI 실측).
+    // 서버를 직접 listen해 둔다 — 별도 프로세스의 부하 생성기가 이 포트로 접속한다. (예전 supertest
+    // 방식에서는 listen 중이 아니면 "첫 요청"이 서버를 열고 응답이 끝나면 server.close()를 불러
+    // 100건 동시 요청 중 일부가 ECONNRESET으로 끊겼다.)
     await app.listen(0);
 
     // Redis는 resetDatabase()가 건드리지 않는다 — 이전 스펙 파일들이 남긴
@@ -124,25 +124,26 @@ describe('POST /punches — P95 부하 테스트', () => {
     );
 
     const recordedAt = '2026-06-15T09:00:00+09:00';
-    const durationsMs = await Promise.all(
-      employees.map(async (e, i) => {
-        const start = performance.now();
-        const res = await request(app.getHttpServer())
-          .post('/punches')
-          .set('Authorization', `Bearer ${tokens[i].accessToken}`)
-          .send({
-            punchType: 'IN',
-            recordedAt,
-            siteId: fixture.siteA.id,
-            registrationMethod: 'PC',
-            deviceId: `dev-load-${e.employeeNo}`,
-            clientEventId: `load-evt-${e.employeeNo}`,
-          });
-        const elapsed = performance.now() - start;
-        expect([200, 201]).toContain(res.status);
-        return elapsed;
-      }),
+    // 요청은 별도 프로세스에서 쏜다 — 같은 프로세스의 supertest 클라이언트가 서버와 이벤트 루프를
+    // 나눠 쓰면 서버가 아니라 테스트 구조를 재게 되고, 러너 CPU 세대에 따라 P95가 1초 안팎으로 흔들렸다
+    // (실측: 같은 코드가 EPYC 9V74에서 703~758ms, 7763에서 1048ms). 100건 동시·P95<1초 기준은 그대로다.
+    const results = await postConcurrently(
+      app,
+      '/punches',
+      employees.map((e, i) => ({
+        token: tokens[i].accessToken,
+        body: {
+          punchType: 'IN',
+          recordedAt,
+          siteId: fixture.siteA.id,
+          registrationMethod: 'PC',
+          deviceId: `dev-load-${e.employeeNo}`,
+          clientEventId: `load-evt-${e.employeeNo}`,
+        },
+      })),
     );
+    results.forEach((r) => expect([200, 201]).toContain(r.status));
+    const durationsMs = results.map((r) => r.elapsedMs);
 
     const sorted = [...durationsMs].sort((a, b) => a - b);
     const p95 = percentile(sorted, 95);
