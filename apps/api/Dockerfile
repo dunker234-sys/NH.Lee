@@ -36,6 +36,8 @@ RUN pnpm install --frozen-lockfile
 # prisma generate → tsc. devDependencies를 그대로 유지한다(migrate 타깃이 재사용). ---
 FROM deps AS build
 COPY . .
+# tsc가 src/test 전체를 컴파일하고 스펙이 shared-types를 import하므로 dist가 먼저 필요하다.
+RUN pnpm --filter @attendance/shared-types build
 RUN pnpm --filter @attendance/core-rules build
 RUN pnpm --filter @attendance/api exec prisma generate
 RUN pnpm --filter @attendance/api build
