@@ -95,6 +95,11 @@ jobs:
       - name: Prisma 클라이언트 생성
         run: pnpm --filter @attendance/api exec prisma generate
 
+      # 러너 사양이 실행마다 다를 수 있어 P95 변동을 해석하려면 사양을 함께 남겨야 한다.
+      - name: 환경 정보
+        run: |
+          nproc; free -m; lscpu | grep -E "Model name|^CPU[(]s[)]|MHz" || true
+
       - name: apps/api 성능 e2e 테스트
         timeout-minutes: 20
         working-directory: apps/api
