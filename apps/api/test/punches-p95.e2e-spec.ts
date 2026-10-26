@@ -28,7 +28,14 @@ function percentile(sortedMs: number[], p: number): number {
   return sortedMs[idx];
 }
 
-/** 완료조건: 타각 API P95 1초 이내(100건 동시 요청 기준). */
+/**
+ * 완료조건: 타각 API P95 1초 이내(100건 동시 요청 기준).
+ *
+ * 이 기준의 판정 환경은 CI(Linux, perf.yml)다. 개발자 Windows PC(특히 하이브리드 CPU)에서는
+ * 별도 프로세스 부하 생성기와 서버 사이의 소켓 지연이 커서 P95가 1.5초 안팎까지 나올 수 있다 —
+ * 서버 처리 시간과 무관한 로컬 환경 특성이므로 로컬 실패를 회귀로 보지 말고 perf.yml 결과로 판단한다.
+ * 기준값(1초)은 완화하지 않는다.
+ */
 describe('POST /punches — P95 부하 테스트', () => {
   let app: INestApplication;
   let fixture: Fixture;
