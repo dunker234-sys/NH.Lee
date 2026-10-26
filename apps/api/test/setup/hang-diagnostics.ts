@@ -28,13 +28,13 @@ async function check(): Promise<void> {
       `SELECT count(*)::int AS total FROM pg_stat_activity WHERE datname = 'attendance_test'`,
     );
     if (stuck.length > 0 || total >= HIGH_CONNECTION_COUNT) {
-      // eslint-disable-next-line no-console
-      console.warn(`[hang-diagnostics] connections=${total} longTx=${stuck.length}\n${JSON.stringify(stuck, null, 1)}`);
+      // jest console은 테스트가 끝난 뒤 찍으면 "Cannot log after tests are done" 오류를 내므로
+      // 표준 에러에 직접 쓴다.
+      process.stderr.write(`[hang-diagnostics] connections=${total} longTx=${stuck.length}\n${JSON.stringify(stuck, null, 1)}\n`);
     }
   } catch (err) {
     // 접속 자체가 안 되는 상황(연결 고갈 등)도 단서다.
-    // eslint-disable-next-line no-console
-    console.warn(`[hang-diagnostics] 점검 실패: ${(err as Error).message.split('\n')[0]}`);
+    process.stderr.write(`[hang-diagnostics] 점검 실패: ${(err as Error).message.split('\n')[0]}\n`);
   } finally {
     await prisma.$disconnect().catch(() => undefined);
   }

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/client';
 
@@ -10,7 +10,7 @@ import { PrismaClient } from '@prisma/client';
  * 위치정보 파기 배치(punch-location-retention.service.ts)만 주입받아 쓴다.
  */
 @Injectable()
-export class RetentionPrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+export class RetentionPrismaService extends PrismaClient implements OnModuleInit, OnApplicationShutdown {
   constructor(config: ConfigService) {
     super({ datasources: { db: { url: config.get<string>('retentionJobDatabaseUrl') } } });
   }
@@ -19,7 +19,8 @@ export class RetentionPrismaService extends PrismaClient implements OnModuleInit
     await this.$connect();
   }
 
-  async onModuleDestroy() {
+  // PrismaService와 같은 이유 — 워커(beforeApplicationShutdown)가 닫힌 뒤에 끊는다.
+  async onApplicationShutdown() {
     await this.$disconnect();
   }
 }

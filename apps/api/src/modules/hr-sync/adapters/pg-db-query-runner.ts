@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import { DbQueryRunner } from './db-query-runner';
@@ -10,7 +10,7 @@ import { DbQueryRunner } from './db-query-runner';
  * 강제할 수 없음 — docs/HR_INTEGRATION.md에 명시).
  */
 @Injectable()
-export class PgDbQueryRunner implements DbQueryRunner, OnModuleDestroy {
+export class PgDbQueryRunner implements DbQueryRunner, OnApplicationShutdown {
   private pool: Pool | null = null;
 
   constructor(private readonly config: ConfigService) {}
@@ -31,7 +31,8 @@ export class PgDbQueryRunner implements DbQueryRunner, OnModuleDestroy {
     return result.rows;
   }
 
-  async onModuleDestroy(): Promise<void> {
+  // hr-sync 워커(beforeApplicationShutdown)가 닫힌 뒤에 풀을 닫는다.
+  async onApplicationShutdown(): Promise<void> {
     await this.pool?.end();
   }
 }

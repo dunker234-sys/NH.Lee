@@ -28,6 +28,7 @@ import { AccessLogInterceptor } from './common/interceptors/access-log.intercept
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { PrincipalModule } from './common/principal/principal.module';
 import { PrismaModule } from './common/prisma/prisma.module';
+import { QueueShutdownModule } from './common/queue/queue-shutdown.module';
 import { PunchModule } from './common/punch/punch.module';
 import { ScopeModule } from './common/scope/scope.module';
 import configuration from './config/configuration';
@@ -62,6 +63,7 @@ import { SystemBatchModule } from './modules/system-batch/system-batch.module';
     // 필요한 엔드포인트(로그인, 타각)는 각 컨트롤러에서 @Throttle로 재정의한다.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 300 }]),
     PrismaModule,
+    QueueShutdownModule,
     AuditLogModule,
     AccessLogModule,
     EmployeeProtectedStatusModule,
