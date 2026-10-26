@@ -20,6 +20,8 @@ COPY . .
 # NEXT_PUBLIC_* 값은 빌드 시점에 번들에 인라인되므로 build-arg로 받는다.
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+# shared-types는 dist/를 만들어야 import할 수 있다(main/types가 dist를 가리킨다) — 앱보다 먼저 빌드한다.
+RUN pnpm --filter @attendance/shared-types build
 RUN pnpm --filter @attendance/admin-web build
 
 # standalone 산출물(.next/standalone)만 담아 node_modules 전체를 옮기지 않는다.

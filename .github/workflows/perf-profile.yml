@@ -1,0 +1,123 @@
+name: Perf Profile
+
+# 100건 동시 타각이 시간을 어디에 쓰는지 단계별로 재는 진단 워크플로(수동 실행). perf.yml과 같은
+# 환경(ubuntu-latest, 2 vCPU)에서 test/punch-burst-profile.e2e-spec.ts를 변형별로 돌린다.
+# 통과/실패 기준은 없다 — 로그의 수치를 읽는 용도다. P95 기준(1초)은 건드리지 않는다.
+
+on:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9.15.0"
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build:packages
+
+      # docs/DATA_MODEL.md가 문서화한 배포 순서(roles.sql → migrate deploy →
+      # roles_post_migrate.sql → seed)를 CI에서도 그대로 따른다. attendance
+      # DB뿐 아니라 e2e가 쓰는 attendance_test DB에도 동일하게 적용한다.
+      - name: DB 롤 생성(roles.sql)
+        run: PGPASSWORD=postgres_ci_password psql -h localhost -U postgres -f apps/api/prisma/roles.sql
+
+      - name: attendance 마이그레이션 적용
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql://migrator:migrator_dev_password@localhost:5432/attendance?schema=public
+        run: npx prisma migrate deploy
+
+      - name: attendance roles_post_migrate.sql 적용
+        run: PGPASSWORD=migrator_dev_password psql -h localhost -U migrator -d attendance -v ON_ERROR_STOP=1 -f apps/api/prisma/roles_post_migrate.sql
+
+      - name: attendance_test 생성 + 마이그레이션 + 권한
+        env:
+          PGPASSWORD: postgres_ci_password
+        run: |
+          psql -h localhost -U postgres -c "CREATE DATABASE attendance_test OWNER migrator;"
+          # roles.sql의 권한 부여는 `\c attendance` 이후라 attendance DB에만 적용된다.
+          # attendance_test에도 같은 권한(접속·스키마 USAGE·migrator가 만들 테이블의 기본 권한)을
+          # 마이그레이션 전에 부여해야 app_rw로 접속한 앱/테스트가 읽고 쓸 수 있다.
+          psql -h localhost -U postgres -d attendance_test -v ON_ERROR_STOP=1 <<'SQL'
+          GRANT CONNECT ON DATABASE attendance_test TO app_rw, migrator, retention_job;
+          GRANT ALL PRIVILEGES ON SCHEMA public TO migrator;
+          GRANT USAGE ON SCHEMA public TO app_rw, retention_job;
+          ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO app_rw;
+          ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO app_rw;
+          SQL
+          cd apps/api
+          DATABASE_URL=postgresql://migrator:migrator_dev_password@localhost:5432/attendance_test?schema=public npx prisma migrate deploy
+          PGPASSWORD=migrator_dev_password psql -h localhost -U migrator -d attendance_test -v ON_ERROR_STOP=1 -f prisma/roles_post_migrate.sql
+
+      - name: Prisma 클라이언트 생성
+        run: pnpm --filter @attendance/api exec prisma generate
+
+      - name: 환경 정보
+        run: |
+          nproc; free -m; lscpu | grep -E "Model name|^CPU[(]s[)]|MHz" || true
+
+      - name: 100건 동시 타각 단계별 프로파일(변형 10회)
+        timeout-minutes: 30
+        working-directory: apps/api
+        env:
+          PROFILE_BURST: '1'
+          HANG_DIAGNOSTICS: '0'
+          BASE_URL: postgresql://app_rw:app_rw_dev_password@localhost:5432/attendance_test?schema=public
+        run: |
+          run_variant() {
+            local name="$1"; shift
+            local pool="$1"; shift
+            echo "################ $name (pool=$pool) ################"
+            vmstat 1 > /tmp/vmstat.log &
+            local vm=$!
+            env "$@" TEST_DATABASE_URL="$BASE_URL&connection_limit=$pool" \
+              pnpm exec jest --config test/jest-e2e.json --runInBand punch-burst-profile > /tmp/jest.log 2>&1 || echo "jest 종료 코드 $?"
+            kill $vm 2>/dev/null || true
+            grep -v -E "could not renew|Missing key" /tmp/jest.log | sed -n '/=== 변형/,/^Tests:/p'
+            # vmstat: us/sy/id/wa 열. 전체 코어 평균 기준 가장 바쁜 1초.
+            awk 'NR>3 { busy=100-$15; if (busy>m) { m=busy; u=$13; s=$14; w=$16 } } END { printf "러너 CPU 최대 사용(1초 평균, 전체 코어): %d%% (us=%s sy=%s wa=%s)\n", m, u, s, w }' /tmp/vmstat.log
+          }
+          for i in 1 2 3; do run_variant "A 기본(실제 P95 테스트와 같은 조건) #$i" 10 PROFILE_WARM=0; done
+          for i in 1 2; do run_variant "B 워커 정지(재계산/탐지 큐 pause) #$i" 10 PROFILE_PAUSE=1; done
+          for i in 1 2; do run_variant "C 부하 생성기 별도 프로세스 #$i" 10 PROFILE_EXT=1; done
+          for i in 1 2; do run_variant "D 풀 20 #$i" 20 PROFILE_WARM=0; done
+          run_variant "E CPU 프로파일 #1" 10 PROFILE_CPU=1

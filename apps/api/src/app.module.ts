@@ -20,6 +20,7 @@ import { RetentionModule } from './modules/retention/retention.module';
 import { OpsMonitoringModule } from './modules/ops-monitoring/ops-monitoring.module';
 import { AuditLogModule } from './common/audit/audit-log.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { HealthController } from './common/health/health.controller';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PrincipalGuard } from './common/guards/principal.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -27,6 +28,7 @@ import { AccessLogInterceptor } from './common/interceptors/access-log.intercept
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { PrincipalModule } from './common/principal/principal.module';
 import { PrismaModule } from './common/prisma/prisma.module';
+import { QueueShutdownModule } from './common/queue/queue-shutdown.module';
 import { PunchModule } from './common/punch/punch.module';
 import { ScopeModule } from './common/scope/scope.module';
 import configuration from './config/configuration';
@@ -61,6 +63,7 @@ import { SystemBatchModule } from './modules/system-batch/system-batch.module';
     // 필요한 엔드포인트(로그인, 타각)는 각 컨트롤러에서 @Throttle로 재정의한다.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 300 }]),
     PrismaModule,
+    QueueShutdownModule,
     AuditLogModule,
     AccessLogModule,
     EmployeeProtectedStatusModule,
@@ -92,6 +95,7 @@ import { SystemBatchModule } from './modules/system-batch/system-batch.module';
     RetentionModule,
     OpsMonitoringModule,
   ],
+  controllers: [HealthController],
   providers: [
     // 실행 순서: ThrottlerGuard(rate limit, 인증 전에 넘치는 요청부터 걸러
     // 낸다) → JwtAuthGuard(토큰 검증) → PrincipalGuard(DB에서 principal/scope

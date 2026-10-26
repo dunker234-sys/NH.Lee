@@ -1,0 +1,142 @@
+# NCP VM 단일 서버 운영 스택. CI(deploy-production)가 SSH로 접속해
+#   docker compose -f docker-compose.prod.yml up -d
+# 를 실행한다. 서버의 같은 디렉터리에 둔 `.env`(infra/ncp/.env.example 참고)가
+# 모든 시크릿의 유일한 출처다 — GitHub에는 런타임 시크릿을 두지 않는다.
+#
+# 노출 포트는 caddy의 80/443뿐이다. postgres/redis/api/admin-web/kiosk는
+# 내부 네트워크에서만 통신한다.
+
+name: attendance
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # 빈 볼륨 최초 기동 시에만 실행된다: DB와 롤 3종 생성(비밀번호는 개발용 임시값
+      # → 아래 db-roles 서비스가 매 배포마다 실값으로 교체한다).
+      - ./roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # BullMQ 큐 유실 방지를 위해 AOF 영속화를 켠다.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # roles.sql이 하드코딩한 개발용 비밀번호를 .env의 실값으로 교체한다(멱등).
+  db-roles:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+      APP_RW_PASSWORD: ${APP_RW_PASSWORD:?}
+      MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:?}
+      RETENTION_PASSWORD: ${RETENTION_PASSWORD:?}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        psql -h postgres -U postgres -v ON_ERROR_STOP=1 \
+          -v app_rw="$$APP_RW_PASSWORD" -v migrator="$$MIGRATOR_PASSWORD" -v retention="$$RETENTION_PASSWORD" <<'SQL'
+        ALTER ROLE app_rw PASSWORD :'app_rw';
+        ALTER ROLE migrator PASSWORD :'migrator';
+        ALTER ROLE retention_job PASSWORD :'retention';
+        SQL
+
+  # 마이그레이션 → roles_post_migrate.sql → 시드. api는 이 잡이 성공해야 뜬다.
+  migrate:
+    image: ${IMAGE_REPO:?}/attendance-api-migrate:${IMAGE_TAG:?}
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+    restart: "no"
+    environment:
+      MIGRATOR_DATABASE_URL: postgresql://migrator:${MIGRATOR_PASSWORD}@postgres:5432/attendance?schema=public
+      APP_DATABASE_URL: postgresql://app_rw:${APP_RW_PASSWORD}@postgres:5432/attendance?schema=public
+
+  api:
+    image: ${IMAGE_REPO:?}/attendance-api:${IMAGE_TAG:?}
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # STEP12: connection_limit 미설정 시 P95가 흔들린 전례가 있다(.env.example 참고).
+      DATABASE_URL: postgresql://app_rw:${APP_RW_PASSWORD}@postgres:5432/attendance?schema=public&connection_limit=40
+      RETENTION_JOB_DATABASE_URL: postgresql://retention_job:${RETENTION_PASSWORD}@postgres:5432/attendance?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?}
+      QR_TOTP_ENCRYPTION_KEY: ${QR_TOTP_ENCRYPTION_KEY:?}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY:?}
+      CORS_ALLOWED_ORIGINS: https://admin.${DOMAIN:?},https://kiosk.${DOMAIN}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  admin-web:
+    image: ${IMAGE_REPO:?}/attendance-admin-web:${IMAGE_TAG:?}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      PORT: "3100"
+
+  kiosk:
+    image: ${IMAGE_REPO:?}/attendance-kiosk:${IMAGE_TAG:?}
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  # 80/443 종단 + Let's Encrypt 자동 인증서. DNS A 레코드 3개(api./admin./kiosk.)가
+  # 이 VM을 가리켜야 발급된다.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - admin-web
+      - kiosk
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

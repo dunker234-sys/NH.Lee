@@ -23,10 +23,14 @@ interface Props {
  * 동작이라 그 문제와 다르다. */
 export function GridView({ employees, days, rows, templates, armedTemplateId, pending, onPendingChange }: Props) {
   const [drag, setDrag] = useState<{ employeeId: string; startIdx: number; curIdx: number } | null>(null);
+  // 이벤트 핸들러(mouseup 등)가 항상 최신 값을 읽도록 렌더 이후에 ref를 갱신한다
+  // (렌더 중 ref 쓰기는 금지 — react-hooks/refs).
   const dragRef = useRef(drag);
-  dragRef.current = drag;
   const armedRef = useRef(armedTemplateId);
-  armedRef.current = armedTemplateId;
+  useEffect(() => {
+    dragRef.current = drag;
+    armedRef.current = armedTemplateId;
+  });
 
   const rowsByKey = new Map<string, ScheduleRow>();
   for (const r of rows) rowsByKey.set(cellKey(r.employeeId, r.workDate.slice(0, 10)), r);

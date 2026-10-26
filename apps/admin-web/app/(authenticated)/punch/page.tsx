@@ -20,15 +20,14 @@ const PUNCH_TYPE_LABEL: Record<PunchType, string> = {
 /** 인쇄용 일단위 QR(수정사항). 근로일 단위 정적 코드라 키오스크 실시간 QR과 달리
  * 자정 전까지는 재조회해도 같은 코드다 — 자동 갱신 타이머가 필요 없다. */
 function QrPosterSection({ sites }: { sites: SiteSummary[] }) {
-  const [siteId, setSiteId] = useState('');
-  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+  const [selectedSiteId, setSelectedSiteId] = useState('');
+  const [qr, setQr] = useState<{ code: string; url: string } | null>(null);
   const queryClient = useQueryClient();
 
   // sites는 부모의 useQuery가 비동기로 채우므로, 마운트 시점엔 항상 빈
-  // 배열이다 — useState 초기값이 아니라 로드된 뒤 한 번 동기화해야 한다.
-  useEffect(() => {
-    if (siteId === '' && sites.length > 0) setSiteId(sites[0].id);
-  }, [sites, siteId]);
+  // 배열이다 — 사용자가 고르기 전까지는 로드된 첫 사업장을 파생값으로 쓴다
+  // (effect에서 state를 동기화하면 불필요한 연쇄 렌더가 난다).
+  const siteId = selectedSiteId !== '' ? selectedSiteId : (sites[0]?.id ?? '');
 
   const codeQuery = useQuery({
     queryKey: ['qr-poster', siteId],
@@ -42,19 +41,19 @@ function QrPosterSection({ sites }: { sites: SiteSummary[] }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['qr-poster', siteId] }),
   });
 
+  const code = codeQuery.data?.code;
   useEffect(() => {
-    if (!codeQuery.data) {
-      setImageDataUrl(null);
-      return;
-    }
+    if (!code) return;
     let cancelled = false;
-    QRCode.toDataURL(codeQuery.data.code, { width: 320, margin: 1 }).then((url) => {
-      if (!cancelled) setImageDataUrl(url);
+    QRCode.toDataURL(code, { width: 320, margin: 1 }).then((url) => {
+      if (!cancelled) setQr({ code, url });
     });
     return () => {
       cancelled = true;
     };
-  }, [codeQuery.data]);
+  }, [code]);
+  // 현재 코드에 해당하는 이미지만 보여 준다(코드가 바뀐 직후 이전 이미지가 잠깐 남지 않게).
+  const imageDataUrl = code && qr?.code === code ? qr.url : null;
 
   const notProvisioned = codeQuery.error instanceof ApiError && codeQuery.error.status === 404;
   const siteName = sites.find((s) => s.id === siteId)?.name ?? '';
@@ -71,7 +70,7 @@ function QrPosterSection({ sites }: { sites: SiteSummary[] }) {
         <select
           className="mt-3 rounded-lg border border-slate-300 px-3 py-2 text-sm"
           value={siteId}
-          onChange={(e) => setSiteId(e.target.value)}
+          onChange={(e) => setSelectedSiteId(e.target.value)}
         >
           {sites.map((s) => (
             <option key={s.id} value={s.id}>

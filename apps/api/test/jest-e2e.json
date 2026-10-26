@@ -5,6 +5,7 @@
     "^.+\\.ts$": "ts-jest"
   },
   "moduleFileExtensions": ["js", "json", "ts"],
-  "setupFiles": ["<rootDir>/setup/env.ts"],
+  "setupFiles": ["<rootDir>/setup/env.ts", "<rootDir>/setup/hang-diagnostics.ts"],
+  "setupFilesAfterEnv": ["<rootDir>/setup/disconnect-admin-prisma.ts"],
   "testTimeout": 30000
 }

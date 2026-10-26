@@ -18,6 +18,11 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
+# VITE_* 값은 빌드 시점에 번들에 인라인되므로 build-arg로 받는다(admin-web과 동일).
+ARG VITE_API_BASE_URL=http://localhost:3000
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# workspace 의존성(shared-types)은 dist/를 만들어야 import할 수 있다 — 앱보다 먼저 빌드한다.
+RUN pnpm --filter @attendance/shared-types build
 RUN pnpm --filter @attendance/kiosk build
 
 FROM nginx:1.27-alpine AS runtime

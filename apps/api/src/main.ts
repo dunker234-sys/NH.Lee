@@ -41,6 +41,11 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
   }
 
+  // SIGTERM/SIGINT(컨테이너 중지·배포) 때 Nest 종료 훅을 실행한다 — BullMQ 워커가 진행 중인 잡을
+  // 마친 뒤 닫히고(WorkerShutdownService), 그 다음 DB 연결이 끊긴다(PrismaService). 없으면 신호에
+  // 프로세스가 즉시 죽어 처리 중이던 재계산 잡이 중단된다.
+  app.enableShutdownHooks();
+
   const port = config.get<number>('port', 3000);
   await app.listen(port);
   new Logger('Bootstrap').log(`API listening on http://localhost:${port} (docs: /docs)`);

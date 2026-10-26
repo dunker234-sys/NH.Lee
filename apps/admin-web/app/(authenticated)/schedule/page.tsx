@@ -111,7 +111,7 @@ export default function SchedulePage() {
 
   function handleConflictApply(resolutions: Map<string, ConflictResolution>) {
     const currentConflicts = conflicts ?? [];
-    let next = new Map(pending);
+    const next = new Map(pending);
     for (const c of currentConflicts) {
       const entry = [...next.entries()].find(([, v]) => v.scheduleId === c.scheduleId);
       if (!entry) continue;

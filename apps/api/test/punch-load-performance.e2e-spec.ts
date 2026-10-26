@@ -10,7 +10,7 @@ import { WEEKLY_ALERT_QUEUE_NAME } from '../src/modules/weekly-alert/queue.const
 import { NOTIFICATIONS_QUEUE_NAME } from '../src/modules/notifications/queue.constants';
 import { createTestApp } from './setup/app';
 import { adminPrisma, resetDatabase } from './setup/db';
-import { login } from './setup/auth-helper';
+import { loginInChunks } from './setup/auth-helper';
 import {
   Fixture,
   loadFixture,
@@ -60,6 +60,8 @@ describe('POST /punches — 출근 피크 분당 500건 지속 처리량 (STEP12
     await loadWeeklyAlertPolicyConfigFixture();
     await loadSiteIpAllowlistFixture(fixture.siteA.id, '127.0.0.1/32', '분당500건 부하테스트 루프백');
     app = await createTestApp();
+    // punches-p95.e2e-spec.ts와 같은 이유 — supertest가 서버를 열고 닫지 않게 직접 listen한다.
+    await app.listen(0);
 
     const recalcQueue = app.get<Queue>(getQueueToken(RECALCULATION_QUEUE_NAME));
     const fraudQueue = app.get<Queue>(getQueueToken(FRAUD_DETECTION_QUEUE_NAME));
@@ -118,16 +120,12 @@ describe('POST /punches — 출근 피크 분당 500건 지속 처리량 (STEP12
 
     // 로그인(=기기 등록)은 측정 구간 밖에서 끝낸다 — punches-p95.e2e-spec.ts와 같은 이유.
     // 500건을 한 번에 동시 발사하면 테스트 커넥션 풀(connection_limit=10)이
-    // 감당 못 해 Prisma 엔진이 죽는다(실측으로 확인) — p95 테스트가 검증한
-    // 100건 동시 규모로 청크를 나눠 순차 실행한다.
-    const LOGIN_CHUNK_SIZE = 100;
-    const tokens: Awaited<ReturnType<typeof login>>[] = [];
-    for (let i = 0; i < employees.length; i += LOGIN_CHUNK_SIZE) {
-      const chunk = employees.slice(i, i + LOGIN_CHUNK_SIZE);
-      // eslint-disable-next-line no-await-in-loop
-      const chunkTokens = await Promise.all(chunk.map((e) => login(app, e.employeeNo, password, `dev-peak-${e.employeeNo}`)));
-      tokens.push(...chunkTokens);
-    }
+    // 감당 못 해 Prisma 엔진이 죽는다(실측으로 확인) — 청크로 나눠 순차 실행한다
+    // (청크 크기는 loginInChunks 참고. 2 vCPU CI에서는 100명 동시도 풀 대기를 넘겼다).
+    const tokens = await loginInChunks(
+      app,
+      employees.map((e) => ({ employeeNo: e.employeeNo, password, deviceId: `dev-peak-${e.employeeNo}` })),
+    );
 
     const recordedAt = '2026-06-15T06:00:00+09:00'; // 출근 피크 창(05:30~09:00) 안.
     const durations: number[] = new Array(TARGET_PER_MINUTE);

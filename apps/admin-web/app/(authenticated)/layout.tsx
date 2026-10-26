@@ -56,6 +56,9 @@ export default function AuthenticatedLayout({ children }: { children: React.Reac
       router.replace('/login');
       return;
     }
+    // localStorage는 브라우저에서만 읽을 수 있어 SSR/하이드레이션 불일치를 피하려면
+    // 마운트 후 effect에서 읽어야 한다 — 의도된 패턴이다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSession(s);
     setChecked(true);
   }, [router]);
